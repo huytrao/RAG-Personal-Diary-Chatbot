@@ -126,7 +126,7 @@ def load_entries_from_database() -> List[Dict[str, Any]]:
 def get_sample_data() -> List[Dict[str, Any]]:
     """Return sample diary entries when database is not available"""
     return [
-        {"date": "2025-08-01", "title": "Meeting with team", "content": "Discussed project timeline.", "type": "Text"},
-        {"date": "2025-08-02", "title": "Workout", "content": "Went to the gym for 1 hour.", "type": "Text"},
-        {"date": "2025-08-03", "title": "Reading", "content": "Read 50 pages of a book.", "type": "Text"},
+        {"date": "2025-08-01", "title": "Welcome to Huy Trao Personal project", "content": "Tks for your visit at Huy Trao Personal project", "type": "Text"},
+        {"date": "2025-08-02", "title": "How to use this chatbot", "content": "Went to the gym for 1 hour.", "type": "Text"},
+        {"date": "2025-08-03", "title": "Let's contact together", "content": "Read 50 pages of a book.", "type": "Text"},
     ]
