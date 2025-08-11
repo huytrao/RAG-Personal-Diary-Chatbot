@@ -11,6 +11,7 @@ Features:
 - Persistent session state for data retention
 """
 import io
+# import os 
 from streamlit_webrtc import webrtc_streamer
 import streamlit as st
 import random
@@ -18,11 +19,12 @@ import time
 from datetime import datetime
 from typing import Generator
 from streamlit_webrtc import WebRtcMode, webrtc_streamer
-
+from backend.get_post import submit_text_to_database, load_entries_from_database
 
 # ========================================
 # HELPER FUNCTIONS
 # ========================================
+
 
 def response_generator() -> Generator[str, None, None]:
     """
@@ -63,12 +65,7 @@ def initialize_session_state() -> None:
     
     # Initialize diary entries with sample data
     if "diary_entries" not in st.session_state:
-        st.session_state.diary_entries = [
-            {"date": "2025-08-01", "title": "Meeting with team", "content": "Discussed project timeline.", "type": "Text"},
-            {"date": "2025-08-02", "title": "Workout", "content": "Went to the gym for 1 hour.", "type": "Text"},
-            {"date": "2025-08-03", "title": "Reading", "content": "Read 50 pages of a book.", "type": "Text"},
-        ]
-    
+        st.session_state.diary_entries = load_entries_from_database()
     # Initialize form visibility state
     if "show_form" not in st.session_state:
         st.session_state.show_form = False
@@ -121,14 +118,15 @@ def render_sidebar() -> str:
     # Create list of diary entry options for selection
     diary_options = [f"{entry['date']} - {entry['title']}" for entry in st.session_state.diary_entries]
     
-    # Radio button for diary entry selection
+    # Radio button for diary entry selection with unique key
     selected = st.sidebar.radio(
         "Select Entry",
-        options=diary_options
+        options=diary_options,
+        key="diary_entry_selector"  # Add unique key
     )
     
-    # Add new diary entry button with toggle functionality
-    if st.sidebar.button("➕ Add New Diary Entry"):
+    # Add new diary entry button with toggle functionality and unique key
+    if st.sidebar.button("➕ Add New Diary Entry", key="add_new_entry_btn"):
         st.session_state.show_form = not st.session_state.show_form
     
     return selected
@@ -163,23 +161,21 @@ def display_selected_diary_entry(selected: str) -> None:
 def render_diary_entry_form() -> None:
     """
     Render the diary entry form for adding new entries.
-    
-    This function displays a comprehensive form for creating new diary entries,
-    including input validation and data persistence.
     """
     st.header("✍️ Add New Diary Entry")
     st.markdown("---")
     
     # Date input with default to today
-    date = st.date_input("📅 Date", value=datetime.now().date())
+    date = st.date_input("📅 Date", value=datetime.now().date(), key="diary_date_input")
     
     # Title input with placeholder
-    title = st.text_input("📌 Title", placeholder="Enter a descriptive title...")
+    title = st.text_input("📌 Title", placeholder="Enter a descriptive title...", key="diary_title_input")
     
     # Entry type selection
     entry_type = st.radio(
         "📝 Entry Type", 
-        options=["Text", "Audio File"]
+        options=["Text", "Audio File"],
+        key="diary_entry_type_radio"  # Add unique key
     )
     
     # Content input based on selected type
@@ -188,42 +184,50 @@ def render_diary_entry_form() -> None:
         content = st.text_area(
             "📖 Write your diary entry here",
             placeholder="Share your thoughts, experiences, or reflections...",
-            height=150
+            height=150,
+            key="diary_text_content"  # Add unique key
         )
+        
     else:
         audio_file = st.file_uploader(
             "🎵 Upload an audio file", 
-            type=["mp3", "wav", "ogg", "m4a"]
+            type=["mp3", "wav", "ogg", "m4a"],
+            key="diary_audio_uploader"  # Add unique key
         )
         st.markdown("🔊 **Audio Entry**")
-        voice_record = webrtc_streamer(key="voice_record", mode=WebRtcMode.SENDRECV, audio_receiver_size=256, media_stream_constraints={"audio": True, "video": False}, async_processing=True)
+        voice_record = webrtc_streamer(
+            key="voice_record_diary", 
+            mode=WebRtcMode.SENDRECV, 
+            audio_receiver_size=256, 
+            media_stream_constraints={"audio": True, "video": False}, 
+            async_processing=True
+        )
 
         if voice_record.audio_receiver:
             frames = voice_record.audio_receiver.get_frames(timeout=1)
             if frames:
-                # convert first frame to numpy array
                 audio_frame = frames[0]
                 audio_np = audio_frame.to_ndarray()
 
-                # Convert numpy array to WAV bytes for st.audio()
                 with io.BytesIO() as wav_io:
                     with wave.open(wav_io, "wb") as wav_file:
-                        wav_file.setnchannels(audio_frame.layout.channels)  # usually 1 for mono
-                        wav_file.setsampwidth(2)  # 2 bytes per sample (16-bit)
+                        wav_file.setnchannels(audio_frame.layout.channels)
+                        wav_file.setsampwidth(2)
                         wav_file.setframerate(audio_frame.sample_rate)
                         wav_file.writeframes(audio_np.tobytes())
                     wav_bytes = wav_io.getvalue()
 
                 st.audio(wav_bytes, format="audio/wav")
+                
         if audio_file:
             content = f"Audio file: {audio_file.name}"
-            # Display audio player for uploaded file
             st.audio(audio_file)
+    
     # Action buttons in columns for better layout
     col1, col2 = st.columns(2)
     
     with col1:
-        if st.button("💾 Save Entry", type="primary"):
+        if st.button("💾 Save Entry", type="primary", key="save_diary_entry_btn"):
             # Input validation
             if not title.strip():
                 st.error("❌ Please enter a title for your diary entry.")
@@ -238,18 +242,23 @@ def render_diary_entry_form() -> None:
                     "content": content
                 }
                 
-                # Add to diary entries list
-                st.session_state.diary_entries.append(new_entry)
+                # Submit to database
+                with st.spinner("Saving to database..."):
+                    success = submit_text_to_database(new_entry)
                 
-                # Success feedback and hide form
-                st.success("✅ Diary entry added successfully!")
-                st.session_state.show_form = False
-                
-                # Trigger rerun to update the UI
-                st.rerun()
+                if success:
+                    # Reload entries from database
+                    st.session_state.diary_entries = load_entries_from_database()
+                    st.success("✅ Diary entry added successfully!")
+                    # Reset form fields after successful save
+                    time.sleep(1)  # Delay to show success message
+                    st.session_state.show_form = False
+                    st.rerun()
+                else:
+                    st.error("❌ Failed to add diary entry.")
     
     with col2:
-        if st.button("❌ Cancel"):
+        if st.button("❌ Cancel", key="cancel_diary_entry_btn"):
             st.session_state.show_form = False
             st.rerun()
 
@@ -257,11 +266,9 @@ def render_diary_entry_form() -> None:
 # ========================================
 # MAIN APPLICATION
 # ========================================
-
 def main() -> None:
     """
     Main application function that orchestrates the entire app.
-    
     This function sets up the page configuration, initializes the session state,
     and renders all UI components in the correct order.
     """
