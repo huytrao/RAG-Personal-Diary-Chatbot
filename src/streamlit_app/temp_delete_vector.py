@@ -29,7 +29,7 @@ if config["google_api_key"]:
         # Remove documents with matching date and title
         filter_criteria = {
             "date": "2025-08-12",
-            "title": "Helloo"
+            "title": "Nhật ký"
         }
         
         success = embedding_storage.delete_documents_by_metadata(filter_criteria)

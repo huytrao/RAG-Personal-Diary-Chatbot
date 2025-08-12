@@ -1,6 +1,6 @@
-from langchain_community.vectorstores import Chroma
+from langchain_chroma import Chroma
 from langchain.schema import Document
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Union
 import os
 import logging
 from pathlib import Path
@@ -13,7 +13,38 @@ logger = logging.getLogger(__name__)
 class DiaryEmbeddingAndStorage:
     """
     Class for embedding diary documents and storing them in Chroma vector database.
+    Enhanced with metadata filtering for ChromaDB compatibility.
     """
+    
+    def _filter_metadata(self, metadata: Dict[str, Any]) -> Dict[str, Union[str, int, float, bool]]:
+        """
+        Filter metadata to only include types supported by ChromaDB.
+        
+        Args:
+            metadata: Original metadata dictionary
+            
+        Returns:
+            Filtered metadata with only supported types
+        """
+        filtered = {}
+        
+        for key, value in metadata.items():
+            if isinstance(value, (str, int, float, bool)) or value is None:
+                filtered[key] = value
+            elif isinstance(value, list):
+                # Convert lists to comma-separated strings
+                if value:  # Only if list is not empty
+                    filtered[f"{key}_list"] = ", ".join(str(item) for item in value)
+                    filtered[f"{key}_count"] = len(value)
+            elif isinstance(value, dict):
+                # Skip complex nested objects
+                logger.debug(f"Skipping complex metadata field: {key}")
+                continue
+            else:
+                # Convert other types to string
+                filtered[key] = str(value)
+        
+        return filtered
     
     def __init__(
         self,
@@ -94,13 +125,27 @@ class DiaryEmbeddingAndStorage:
             return []
         
         try:
+            # Filter metadata for each document
+            filtered_documents = []
+            for doc in documents:
+                filtered_metadata = self._filter_metadata(doc.metadata)
+                filtered_doc = Document(
+                    page_content=doc.page_content,
+                    metadata=filtered_metadata
+                )
+                filtered_documents.append(filtered_doc)
+                
+                # Log metadata transformation for debugging
+                logger.debug(f"Original metadata keys: {list(doc.metadata.keys())}")
+                logger.debug(f"Filtered metadata keys: {list(filtered_metadata.keys())}")
+            
             # Add documents to vector store
-            document_ids = self.vector_store.add_documents(documents)
+            document_ids = self.vector_store.add_documents(filtered_documents)
             
-            # Persist the vector store
-            self.vector_store.persist()
+            # Persist the vector store (auto-persisted in new langchain-chroma)
+            # self.vector_store.persist()  # Not needed in langchain-chroma 0.2+
             
-            logger.info(f"Successfully embedded and stored {len(documents)} documents")
+            logger.info(f"Successfully embedded and stored {len(filtered_documents)} documents")
             return document_ids
             
         except Exception as e:
@@ -127,10 +172,22 @@ class DiaryEmbeddingAndStorage:
             return []
         
         try:
+            # Filter metadata if provided
+            filtered_metadatas = None
+            if metadatas:
+                filtered_metadatas = []
+                for metadata in metadatas:
+                    filtered_metadata = self._filter_metadata(metadata)
+                    filtered_metadatas.append(filtered_metadata)
+                    
+                    # Log metadata transformation for debugging
+                    logger.debug(f"Original metadata keys: {list(metadata.keys())}")
+                    logger.debug(f"Filtered metadata keys: {list(filtered_metadata.keys())}")
+            
             # Add texts to vector store
             document_ids = self.vector_store.add_texts(
                 texts=texts,
-                metadatas=metadatas
+                metadatas=filtered_metadatas
             )
             
             # Persist the vector store

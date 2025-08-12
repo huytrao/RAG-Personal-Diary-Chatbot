@@ -26,6 +26,21 @@ from typing import Generator, List
 from streamlit_webrtc import WebRtcMode, webrtc_streamer
 from backend.get_post import submit_text_to_database, load_entries_from_database, delete_diary_entry
 
+# Load environment variables
+from dotenv import load_dotenv
+load_dotenv()  # Load .env file from root directory
+
+# Add parent directory to path for RAG system import
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# Import RAG system
+try:
+    from Retrivel_And_Generation.Retrieval_And_Generator import create_rag_system, DiaryRAGSystem
+    RAG_AVAILABLE = True
+except ImportError as e:
+    print(f"Warning: RAG system not available: {e}")
+    RAG_AVAILABLE = False
+
 # ========================================
 # TAG HELPER FUNCTIONS
 # ========================================
@@ -404,30 +419,112 @@ else:
         return False
 
 
-def response_generator() -> Generator[str, None, None]:
+def initialize_rag_system():
     """
-    Generates streaming chatbot responses by yielding words one at a time.
+    Lazy initialization of RAG system when first needed.
+    """
+    if st.session_state.get("rag_system_status") == "ready_to_initialize":
+        try:
+            with st.spinner("🤖 Đang khởi tạo AI Assistant..."):
+                vector_db_path = "../Indexingstep/diary_vector_db_enhanced"
+                google_api_key = os.getenv("GOOGLE_API_KEY")
+                
+                st.session_state.rag_system = create_rag_system(
+                    vector_db_path=vector_db_path,
+                    google_api_key=google_api_key
+                )
+                
+                # Check if system is healthy
+                status = st.session_state.rag_system.health_check()
+                if status.get("vector_store_healthy"):
+                    st.success("🤖 AI Assistant được kích hoạt với dữ liệu nhật ký!")
+                    st.session_state.rag_system_status = "initialized"
+                    return True
+                else:
+                    st.warning("⚠️ AI Assistant chưa có dữ liệu nhật ký để học.")
+                    st.session_state.rag_system = None
+                    st.session_state.rag_system_status = "no_data"
+                    return False
+                    
+        except Exception as e:
+            st.error(f"❌ Không thể khởi tạo AI Assistant: {str(e)}")
+            st.session_state.rag_system = None
+            st.session_state.rag_system_status = "error"
+            return False
     
-    This function simulates a real-time chat experience by randomly selecting
-    a response and yielding each word with a small delay.
+    return st.session_state.get("rag_system") is not None
+
+
+def response_generator(user_query: str) -> Generator[str, None, None]:
+    """
+    Generates streaming chatbot responses using RAG system or fallback responses.
+    
+    Args:
+        user_query: The user's input message
     
     Yields:
-        str: Individual words from the selected response with trailing space
+        str: Individual words from the response with trailing space
     """
-    # Predefined responses for the chatbot
-    responses = [
-        "Hello there! How can I assist you today?",
-        "Hi, human! Is there anything I can help you with?",
-        "Do you need help?",
-    ]
-    
-    # Randomly select a response
-    response = random.choice(responses)
+    try:
+        # Try to use RAG system if available
+        if RAG_AVAILABLE:
+            # Initialize RAG system if needed
+            if not st.session_state.get('rag_system') and st.session_state.get('rag_system_status') == 'ready_to_initialize':
+                initialize_rag_system()
+            
+            # Use RAG system if available
+            if st.session_state.get('rag_system'):
+                # Get chat history for context
+                chat_history = st.session_state.get('messages', [])
+                
+                # Check if fast mode is enabled
+                fast_mode = st.session_state.get('fast_mode', False)
+                
+                if fast_mode:
+                    # Use fast response for speed
+                    response = st.session_state.rag_system.generate_fast_response(
+                        query=user_query
+                    )
+                else:
+                    # Use full contextual response
+                    response = st.session_state.rag_system.generate_contextual_response(
+                        query=user_query,
+                        chat_history=chat_history
+                    )
+            else:
+                # Fallback to predefined responses
+                response = get_fallback_response()
+        else:
+            # Fallback to predefined responses
+            response = get_fallback_response()
+        
+    except Exception as e:
+        # Error handling - use simple fallback
+        print(f"Error in response generation: {e}")
+        response = "Xin lỗi, tôi gặp chút vấn đề. Bạn có thể thử lại được không?"
     
     # Stream the response word by word
-    for word in response.split():
+    words = response.split()
+    fast_mode = st.session_state.get('fast_mode', False)
+    
+    # Adjust streaming speed based on mode
+    delay = 0.01 if fast_mode else 0.03
+    
+    for word in words:
         yield word + " "
-        time.sleep(0.03)  # Small delay for streaming effect
+        time.sleep(delay)  # Faster streaming in fast mode
+
+
+def get_fallback_response() -> str:
+    """Get a fallback response when RAG system is not available."""
+    responses = [
+        "Xin chào! Tôi có thể giúp gì cho bạn về nhật ký của bạn?",
+        "Tôi sẽ giúp bạn tìm hiểu và phân tích nhật ký cá nhân. Bạn muốn biết điều gì?",
+        "Hãy cho tôi biết bạn đang tìm kiếm thông tin gì trong nhật ký của mình?",
+        "Tôi có thể giúp bạn khám phá những kỷ niệm và cảm xúc trong nhật ký. Bạn quan tâm đến điều gì?",
+        "Hiện tại tôi đang ở chế độ cơ bản. Hãy kể cho tôi nghe về nhật ký của bạn!"
+    ]
+    return random.choice(responses)
 
 
 def initialize_session_state() -> None:
@@ -444,9 +541,27 @@ def initialize_session_state() -> None:
     # Initialize diary entries with sample data
     if "diary_entries" not in st.session_state:
         st.session_state.diary_entries = load_entries_from_database()
+    
     # Initialize form visibility state
     if "show_form" not in st.session_state:
         st.session_state.show_form = False
+    
+    # Initialize RAG system
+    if "rag_system" not in st.session_state:
+        st.session_state.rag_system = None
+        st.session_state.rag_system_status = "not_initialized"
+        
+        if RAG_AVAILABLE:
+            # Don't initialize immediately - do it lazily when first used
+            google_api_key = os.getenv("GOOGLE_API_KEY")
+            if google_api_key:
+                st.session_state.rag_system_status = "ready_to_initialize"
+            else:
+                st.warning("⚠️ Không tìm thấy Google API key. AI Assistant sẽ sử dụng chế độ cơ bản.")
+                st.session_state.rag_system_status = "no_api_key"
+        else:
+            st.info("💡 AI Assistant chưa được cấu hình. Sử dụng chế độ cơ bản.")
+            st.session_state.rag_system_status = "unavailable"
 
 
 def display_chat_history() -> None:
@@ -466,9 +581,9 @@ def handle_chat_input() -> None:
     Handle new chat input from the user.
     
     This function processes user input, displays it in the chat, generates
-    a streaming response, and updates the session state with both messages.
+    a streaming response using RAG system, and updates the session state.
     """
-    if prompt := st.chat_input("What is up?"):
+    if prompt := st.chat_input("Hãy hỏi tôi về nhật ký của bạn..."):
         # Add user message to chat history
         st.session_state.messages.append({"role": "user", "content": prompt})
         
@@ -478,7 +593,8 @@ def handle_chat_input() -> None:
         
         # Generate and display assistant response with streaming effect
         with st.chat_message("assistant"):
-            response = st.write_stream(response_generator())
+            # Pass the user prompt to response_generator
+            response = st.write_stream(response_generator(prompt))
         
         # Add assistant response to chat history
         st.session_state.messages.append({"role": "assistant", "content": response})
@@ -553,6 +669,63 @@ def render_sidebar() -> str:
     st.sidebar.markdown("---")
     if st.sidebar.button("➕ Add New Diary Entry", key="add_new_entry_btn"):
         st.session_state.show_form = not st.session_state.show_form
+    
+    # RAG System Status Section
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("🤖 AI Assistant Status")
+    
+    rag_status = st.session_state.get('rag_system_status', 'not_initialized')
+    
+    if rag_status == "initialized" and st.session_state.get('rag_system'):
+        try:
+            status = st.session_state.rag_system.health_check()
+            
+            if status.get("vector_store_healthy"):
+                st.sidebar.success("✅ AI Assistant Active")
+                doc_count = status.get("document_count", 0)
+                st.sidebar.metric("Documents Indexed", doc_count)
+                
+                # Fast Mode Toggle
+                st.sidebar.markdown("**⚡ Performance Settings**")
+                fast_mode = st.sidebar.checkbox(
+                    "Fast Mode", 
+                    value=st.session_state.get('fast_mode', False),
+                    help="Enable for faster responses (shorter, more concise answers)"
+                )
+                st.session_state.fast_mode = fast_mode
+                
+                if fast_mode:
+                    st.sidebar.caption("🚀 Fast responses enabled")
+                else:
+                    st.sidebar.caption("💭 Full contextual responses")
+                    
+            else:
+                st.sidebar.warning("⚠️ No indexed data")
+                st.sidebar.info("Run indexing to enable AI features")
+                
+        except Exception as e:
+            st.sidebar.error("❌ AI Assistant Error")
+            st.sidebar.caption(f"Error: {str(e)}")
+    
+    elif rag_status == "ready_to_initialize":
+        st.sidebar.info("🔄 AI Ready to Initialize")
+        st.sidebar.caption("Will initialize on first use")
+        
+    elif rag_status == "no_api_key":
+        st.sidebar.warning("⚠️ No API Key")
+        st.sidebar.caption("Set GOOGLE_API_KEY to enable AI")
+        
+    elif rag_status == "no_data":
+        st.sidebar.warning("⚠️ No Data Available")
+        st.sidebar.caption("Run indexing to add diary data")
+        
+    elif rag_status == "error":
+        st.sidebar.error("❌ AI Assistant Error")
+        st.sidebar.caption("Check logs for details")
+        
+    else:
+        st.sidebar.info("💡 AI Assistant Disabled")
+        st.sidebar.caption("Basic responses only")
     
     return selected
 

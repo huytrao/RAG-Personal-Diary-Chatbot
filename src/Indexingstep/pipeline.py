@@ -3,7 +3,7 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from dataloading import DiaryDataLoader, DiaryContentPreprocessor
-from Datasplitting import DataSplitting
+from diary_text_splitter import DiaryTextSplitter
 from embedding_and_storing import DiaryEmbeddingAndStorage
 from langchain.schema import Document
 from typing import List, Dict, Any, Optional
@@ -16,8 +16,8 @@ logger = logging.getLogger(__name__)
 
 class DiaryIndexingPipeline:
     """
-    Complete pipeline for indexing diary entries with embeddings.
-    Integrates data loading, preprocessing, splitting, embedding, and storage.
+    Enhanced pipeline for indexing diary entries with optimized chunking and metadata.
+    Integrates data loading, preprocessing, diary-specific splitting, embedding, and storage.
     """
     
     def __init__(
@@ -26,21 +26,21 @@ class DiaryIndexingPipeline:
         persist_directory: str = "./chroma_db",
         collection_name: str = "diary_collection",
         google_api_key: Optional[str] = None,
-        chunk_size: int = 1000,
-        chunk_overlap: int = 200,
+        chunk_size: int = 300,  # Optimized for diary entries (200-300 tokens)
+        chunk_overlap: int = 50,  # 50-token sliding window
         embedding_model: str = "models/embedding-001",
         batch_size: int = 50
     ):
         """
-        Initialize the complete diary indexing pipeline.
+        Initialize the enhanced diary indexing pipeline.
         
         Args:
             db_path (str): Path to SQLite database
             persist_directory (str): Directory for vector database
             collection_name (str): Name of the collection
             google_api_key (str, optional): Google API key for embeddings
-            chunk_size (int): Size of text chunks
-            chunk_overlap (int): Overlap between chunks
+            chunk_size (int): Size of text chunks (optimized for diary entries)
+            chunk_overlap (int): Overlap between chunks (sliding window)
             embedding_model (str): Google embedding model name
             batch_size (int): Batch size for processing
         """
@@ -81,15 +81,14 @@ class DiaryIndexingPipeline:
         self.preprocessor = DiaryContentPreprocessor(
             remove_extra_whitespace=True,
             normalize_line_breaks=True,
-            min_content_length=3,  # Giảm xuống để accept những entry ngắn
+            min_content_length=3,  # Keep short entries
             max_content_length=10000
         )
         
-        # 3. Text Splitter
-        self.text_splitter = DataSplitting(
+        # 3. Diary-optimized Text Splitter
+        self.text_splitter = DiaryTextSplitter(
             chunk_size=chunk_size,
-            chunk_overlap=chunk_overlap,
-            separator="\n\n"
+            chunk_overlap=chunk_overlap
         )
         
         # 4. Embedding and Storage
@@ -159,20 +158,23 @@ class DiaryIndexingPipeline:
     
     def split_documents(self, documents: List[Document]) -> List[Document]:
         """
-        Split documents into chunks.
+        Split documents into optimized chunks using diary-specific splitter.
         
         Args:
             documents (List[Document]): Documents to split
             
         Returns:
-            List[Document]: Split document chunks
+            List[Document]: Split document chunks with enhanced metadata
         """
         try:
-            logger.info(f"Splitting {len(documents)} documents into chunks...")
+            logger.info(f"Splitting {len(documents)} diary entries into optimized chunks...")
             
             split_docs = self.text_splitter.split_documents(documents)
             
-            logger.info(f"Document splitting complete: {len(split_docs)} chunks created")
+            # Get and log chunking statistics
+            stats = self.text_splitter.get_chunk_stats(split_docs)
+            logger.info(f"Document splitting complete: {stats}")
+            
             return split_docs
             
         except Exception as e:

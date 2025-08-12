@@ -10,8 +10,9 @@ import argparse
 from datetime import datetime
 from dotenv import load_dotenv
 
-# Add the parent directory to path to import modules
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Add the current directory to path to import modules
+current_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, current_dir)
 
 from pipeline import DiaryIndexingPipeline
 import logging
@@ -34,8 +35,8 @@ def load_environment_config():
     
     config = {
         "google_api_key": os.getenv("GOOGLE_API_KEY"),
-        "db_path": os.getenv("DATABASE_PATH", "../streamlit_app/backend/diary.db"),
-        "persist_directory": os.getenv("VECTOR_DB_PATH", "./diary_vector_db"),
+        "db_path": os.getenv("DATABASE_PATH", "../../streamlit_app/backend/diary.db"),
+        "persist_directory": os.getenv("VECTOR_DB_PATH", "./diary_vector_db_enhanced"),
         "collection_name": os.getenv("COLLECTION_NAME", "diary_entries"),
         "embedding_model": os.getenv("EMBEDDING_MODEL", "models/embedding-001"),
         "chunk_size": int(os.getenv("CHUNK_SIZE", "800")),
