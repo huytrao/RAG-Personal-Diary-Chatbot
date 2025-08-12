@@ -12,6 +12,7 @@ DB_PATH = "./diary.db"
 class DiaryEntry(BaseModel):
     date: str
     content: str
+    tags: str = ""  # Add tags field with default empty string
 
 def init_db_if_not_exists():
     """Initialize database if it doesn't exist"""
@@ -23,9 +24,19 @@ def init_db_if_not_exists():
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 date TEXT NOT NULL,
                 content TEXT NOT NULL,
+                tags TEXT DEFAULT '',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        
+        # Add tags column to existing table if it doesn't exist
+        try:
+            cursor.execute("ALTER TABLE diary_entries ADD COLUMN tags TEXT DEFAULT ''")
+            conn.commit()
+        except sqlite3.OperationalError:
+            # Column already exists
+            pass
+        
         conn.commit()
         conn.close()
         print(f"Database initialized successfully at {DB_PATH}")
@@ -46,11 +57,11 @@ async def submit_diary_entry(entry: DiaryEntry):
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         
-        print(f"Inserting into database: date='{entry.date}', content='{entry.content[:50]}...'")
+        print(f"Inserting into database: date='{entry.date}', content='{entry.content[:50]}...', tags='{entry.tags}'")
         
         cursor.execute(
-            "INSERT INTO diary_entries (date, content) VALUES (?, ?)",
-            (entry.date, entry.content)
+            "INSERT INTO diary_entries (date, content, tags) VALUES (?, ?, ?)",
+            (entry.date, entry.content, entry.tags)
         )
         
         conn.commit()
@@ -107,7 +118,7 @@ async def get_diary_entries():
             conn.close()
             return {"entries": []}
         
-        cursor.execute("SELECT id, date, content, created_at FROM diary_entries ORDER BY created_at DESC")
+        cursor.execute("SELECT id, date, content, tags, created_at FROM diary_entries ORDER BY created_at DESC")
         entries = cursor.fetchall()
         conn.close()
         
@@ -119,7 +130,8 @@ async def get_diary_entries():
                     "id": entry[0],
                     "date": entry[1], 
                     "content": entry[2],
-                    "created_at": entry[3]
+                    "tags": entry[3] if len(entry) > 3 else "",  # Handle entries without tags
+                    "created_at": entry[4] if len(entry) > 4 else entry[3]  # Handle old schema
                 }
                 for entry in entries
             ]

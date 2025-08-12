@@ -11,9 +11,19 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             date TEXT NOT NULL,
             content TEXT NOT NULL,
+            tags TEXT DEFAULT '',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    
+    # Add tags column to existing table if it doesn't exist
+    try:
+        cursor.execute("ALTER TABLE diary_entries ADD COLUMN tags TEXT DEFAULT ''")
+        conn.commit()
+    except sqlite3.OperationalError:
+        # Column already exists
+        pass
+    
     conn.commit()
     conn.close()
 

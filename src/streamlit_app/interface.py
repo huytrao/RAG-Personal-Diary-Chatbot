@@ -9,19 +9,119 @@ Features:
 - Diary entry management (create, view, select)
 - Support for text and audio diary entries
 - Persistent session state for data retention
+- Colorful tag system for organizing entries
 """
 import io
 import os
 import sys
 import wave
+import re
+import hashlib
 from streamlit_webrtc import webrtc_streamer
 import streamlit as st
 import random
 import time
 from datetime import datetime
-from typing import Generator
+from typing import Generator, List
 from streamlit_webrtc import WebRtcMode, webrtc_streamer
 from backend.get_post import submit_text_to_database, load_entries_from_database, delete_diary_entry
+
+# ========================================
+# TAG HELPER FUNCTIONS
+# ========================================
+
+def extract_tags_from_content(content: str) -> List[str]:
+    """
+    Extract #tags from content string.
+    
+    Args:
+        content: The diary content string
+        
+    Returns:
+        List of tags found (without # symbol)
+    """
+    if not content:
+        return []
+    
+    # Find all #tags in content (word characters and non-whitespace)
+    tag_pattern = r'#(\w+(?:[_-]\w+)*)'
+    matches = re.findall(tag_pattern, content, re.IGNORECASE)
+    
+    # Remove duplicates and return lowercase tags
+    return list(set([tag.lower() for tag in matches]))
+
+def parse_tags_input(tags_input: str) -> List[str]:
+    """
+    Parse comma-separated tags input and clean them.
+    
+    Args:
+        tags_input: Comma-separated string of tags
+        
+    Returns:
+        List of cleaned tags
+    """
+    if not tags_input:
+        return []
+    
+    # Split by comma and clean each tag
+    tags = []
+    for tag in tags_input.split(','):
+        tag = tag.strip()
+        # Remove # if user added it
+        if tag.startswith('#'):
+            tag = tag[1:]
+        # Only add non-empty tags
+        if tag:
+            tags.append(tag.lower())
+    
+    return list(set(tags))  # Remove duplicates
+
+def generate_tag_color(tag: str) -> str:
+    """
+    Generate a consistent color for a tag based on its name.
+    
+    Args:
+        tag: The tag name
+        
+    Returns:
+        CSS color string
+    """
+    # Use hash to generate consistent colors
+    hash_obj = hashlib.md5(tag.encode())
+    hash_hex = hash_obj.hexdigest()
+    
+    # Extract RGB values from hash
+    r = int(hash_hex[0:2], 16)
+    g = int(hash_hex[2:4], 16)
+    b = int(hash_hex[4:6], 16)
+    
+    # Ensure colors are not too dark or too light
+    r = max(60, min(200, r))
+    g = max(60, min(200, g))
+    b = max(60, min(200, b))
+    
+    return f"rgb({r}, {g}, {b})"
+
+def render_tags(tags: List[str]) -> str:
+    """
+    Render tags as colored HTML badges.
+    
+    Args:
+        tags: List of tag names
+        
+    Returns:
+        HTML string for displaying tags
+    """
+    if not tags:
+        return ""
+    
+    tag_html = []
+    for tag in tags:
+        color = generate_tag_color(tag)
+        # Use simpler inline styles to avoid rendering issues
+        tag_html.append(f'<span style="background-color: {color}; color: white; padding: 2px 8px; border-radius: 12px; font-size: 0.8em; margin: 2px; display: inline-block; font-weight: bold;">#{tag}</span>')
+    
+    return "".join(tag_html)
 
 # ========================================
 # HELPER FUNCTIONS
@@ -393,17 +493,64 @@ def render_sidebar() -> str:
     """
     st.sidebar.header("📖 Diary List")
     
-    # Create list of diary entry options for selection
-    diary_options = [f"{entry['date']} - {entry['title']}" for entry in st.session_state.diary_entries]
+    # Add tag filter section first
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("🏷️ Filter by Tags")
     
-    # Radio button for diary entry selection with unique key
+    # Get all unique tags from all entries
+    all_tags = set()
+    for entry in st.session_state.diary_entries:
+        entry_tags = entry.get('tags', '')
+        if entry_tags:
+            tags = [tag.strip() for tag in entry_tags.split(',') if tag.strip()]
+            all_tags.update(tags)
+    
+    selected_tag_filter = "All"
+    if all_tags:
+        # Show tag filter options
+        selected_tag_filter = st.sidebar.selectbox(
+            "Filter by tag:",
+            options=["All"] + sorted(list(all_tags)),
+            key="tag_filter"
+        )
+    
+    # Filter entries based on selected tag
+    filtered_entries = []
+    if selected_tag_filter == "All":
+        filtered_entries = st.session_state.diary_entries
+    else:
+        for entry in st.session_state.diary_entries:
+            entry_tags = entry.get('tags', '')
+            if entry_tags and selected_tag_filter in [tag.strip() for tag in entry_tags.split(',')]:
+                filtered_entries.append(entry)
+    
+    st.sidebar.markdown("---")
+    
+    # Display entries with tags in a clean format
+    if not filtered_entries:
+        st.sidebar.warning("No entries found with the selected tag.")
+        return None
+    
+    # Create formatted options showing title and tags
+    diary_options = []
+    for entry in filtered_entries:
+        # Get tags for this entry
+        entry_tags = entry.get('tags', '')
+        tag_list = [tag.strip() for tag in entry_tags.split(',') if tag.strip()] if entry_tags else []
+        
+        # Create option string with tags visible
+        option_str = f"{entry['date']} - {entry['title']}"
+        diary_options.append(option_str)
+    
+    # Radio button for diary entry selection
     selected = st.sidebar.radio(
-        "Select Entry",
+        "Select Entry:",
         options=diary_options,
-        key="diary_entry_selector"  # Add unique key
+        key=f"diary_entry_selector_{selected_tag_filter}"
     )
     
-    # Add new diary entry button with toggle functionality and unique key
+    # Add new diary entry button
+    st.sidebar.markdown("---")
     if st.sidebar.button("➕ Add New Diary Entry", key="add_new_entry_btn"):
         st.session_state.show_form = not st.session_state.show_form
     
@@ -441,6 +588,14 @@ def display_selected_diary_entry(selected: str) -> None:
                 st.markdown("🎵 **Audio Entry**")
             else:
                 st.markdown("📄 **Text Entry**")
+            
+            # Display tags if they exist
+            entry_tags = entry.get('tags', '')
+            if entry_tags:
+                tag_list = [tag.strip() for tag in entry_tags.split(',') if tag.strip()]
+                if tag_list:
+                    st.markdown("**Tags:**")
+                    st.markdown(render_tags(tag_list), unsafe_allow_html=True)
             
             # Display content with proper spacing
             st.markdown("---")
@@ -520,10 +675,41 @@ def render_diary_entry_form() -> None:
     if entry_type == "Text":
         content = st.text_area(
             "📖 Write your diary entry here",
-            placeholder="Share your thoughts, experiences, or reflections...",
+            placeholder="Share your thoughts, experiences, or reflections... You can also use #tags in your content!",
             height=150,
             key="diary_text_content"  # Add unique key
         )
+        
+        # Tags input section
+        st.markdown("### 🏷️ Tags")
+        col1, col2 = st.columns([2, 1])
+        
+        with col1:
+            tags_input = st.text_input(
+                "Add tags (comma-separated)",
+                placeholder="work, travel, family, thoughts, #mood",
+                key="diary_tags_input",
+                help="Enter tags separated by commas. You can use # or not - we'll handle it!"
+            )
+        
+        with col2:
+            if content:
+                # Auto-extract tags from content
+                auto_tags = extract_tags_from_content(content)
+                if auto_tags:
+                    st.write("**Found in text:**")
+                    for tag in auto_tags:
+                        st.markdown(f"#{tag}", unsafe_allow_html=True)
+        
+        # Parse and combine tags
+        manual_tags = parse_tags_input(tags_input)
+        auto_tags = extract_tags_from_content(content) if content else []
+        all_tags = list(set(manual_tags + auto_tags))  # Combine and remove duplicates
+        
+        # Show preview of all tags
+        if all_tags:
+            st.markdown("**Tag Preview:**")
+            st.markdown(render_tags(all_tags), unsafe_allow_html=True)
         
     else:
         audio_file = st.file_uploader(
@@ -559,6 +745,22 @@ def render_diary_entry_form() -> None:
         if audio_file:
             content = f"Audio file: {audio_file.name}"
             st.audio(audio_file)
+        
+        # For audio entries, still allow tag input
+        if entry_type == "Audio File":
+            st.markdown("### 🏷️ Tags")
+            tags_input = st.text_input(
+                "Add tags (comma-separated)",
+                placeholder="work, travel, family, thoughts",
+                key="diary_audio_tags_input",
+                help="Enter tags separated by commas"
+            )
+            all_tags = parse_tags_input(tags_input)
+            
+            # Show preview of tags
+            if all_tags:
+                st.markdown("**Tag Preview:**")
+                st.markdown(render_tags(all_tags), unsafe_allow_html=True)
     
     # Action buttons in columns for better layout
     col1, col2 = st.columns(2)
@@ -571,12 +773,23 @@ def render_diary_entry_form() -> None:
             elif not content:
                 st.error("❌ Please provide diary content (text or audio file).")
             else:
+                # Get tags based on entry type
+                if entry_type == "Text":
+                    # For text entries, combine manual and auto-extracted tags
+                    manual_tags = parse_tags_input(tags_input) if 'tags_input' in locals() else []
+                    auto_tags = extract_tags_from_content(content) if content else []
+                    final_tags = list(set(manual_tags + auto_tags))
+                else:
+                    # For audio entries, only manual tags
+                    final_tags = parse_tags_input(tags_input) if 'tags_input' in locals() else []
+                
                 # Create new diary entry
                 new_entry = {
                     "date": date.strftime("%Y-%m-%d"),
                     "title": title.strip(),
                     "type": entry_type,
-                    "content": content
+                    "content": content,
+                    "tags": ",".join(final_tags)  # Add tags to entry
                 }
                 
                 # Submit to database

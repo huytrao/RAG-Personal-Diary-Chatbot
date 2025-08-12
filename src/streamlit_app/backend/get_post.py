@@ -32,12 +32,14 @@ def submit_text_to_database(entry: Dict[str, Any]) -> bool:
         title = entry.get('title', 'Untitled')
         entry_type = entry.get('type', 'Text')
         content = entry.get('content', '')
+        tags = entry.get('tags', '')  # Get tags from entry
         
         full_content = f"Title: {title}\nType: {entry_type}\nContent: {content}"
         
         payload = {
             "date": entry["date"],
-            "content": full_content
+            "content": full_content,
+            "tags": tags  # Add tags to payload
         }
         
         response = requests.post(
@@ -105,6 +107,7 @@ def load_entries_from_database() -> List[Dict[str, Any]]:
                     "title": title,
                     "content": content,
                     "type": entry_type,
+                    "tags": entry.get("tags", ""),  # Add tags field
                     "created_at": entry.get("created_at")
                 })
             
