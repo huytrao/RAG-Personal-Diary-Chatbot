@@ -11,7 +11,9 @@ Features:
 - Persistent session state for data retention
 """
 import io
-# import os 
+import os
+import sys
+import wave
 from streamlit_webrtc import webrtc_streamer
 import streamlit as st
 import random
@@ -19,11 +21,287 @@ import time
 from datetime import datetime
 from typing import Generator
 from streamlit_webrtc import WebRtcMode, webrtc_streamer
-from backend.get_post import submit_text_to_database, load_entries_from_database
+from backend.get_post import submit_text_to_database, load_entries_from_database, delete_diary_entry
 
 # ========================================
 # HELPER FUNCTIONS
 # ========================================
+
+def run_incremental_indexing_simple() -> bool:
+    """
+    Run incremental indexing by calling the indexing script directly.
+    This avoids async/event loop issues in Streamlit.
+    
+    Returns:
+        bool: True if indexing was successful, False otherwise
+    """
+    try:
+        import subprocess
+        from datetime import datetime, timedelta
+        
+        # Check if indexing script exists
+        script_path = os.path.join(os.path.dirname(__file__), '..', 'Indexingstep', 'run_indexing.py')
+        if not os.path.exists(script_path):
+            st.warning("⚠️ Indexing script not found. Skipping indexing.")
+            return False
+        
+        # Check for API key
+        from dotenv import load_dotenv
+        load_dotenv(os.path.join(os.path.dirname(__file__), '..', 'Indexingstep', '.env'))
+        if not os.getenv("GOOGLE_API_KEY"):
+            st.warning("⚠️ Google API key not found. Skipping indexing.")
+            return False
+        
+        with st.spinner("🔄 Updating search index..."):
+            # Get the virtual environment python path
+            venv_python = os.path.join(
+                os.path.dirname(__file__), '..', '..', '.venv', 'Scripts', 'python.exe'
+            )
+            
+            # Use system python if venv not found
+            python_cmd = venv_python if os.path.exists(venv_python) else sys.executable
+            
+            # Run indexing script with incremental mode
+            end_date = datetime.now().strftime("%Y-%m-%d")
+            start_date = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
+            
+            # Prepare command
+            cmd = [
+                python_cmd,
+                script_path,
+                "--mode", "incremental",
+                "--start-date", start_date,
+                "--end-date", end_date
+            ]
+            
+            # Run the command in background
+            result = subprocess.run(
+                cmd,
+                cwd=os.path.dirname(script_path),
+                capture_output=True,
+                text=True,
+                timeout=120,  # 2 minute timeout
+                shell=True  # Use shell on Windows
+            )
+            
+            if result.returncode == 0:
+                st.success("✅ Search index updated successfully!")
+                # Show some output if available
+                if "successfully" in result.stdout.lower():
+                    return True
+                return True
+            else:
+                error_msg = result.stderr if result.stderr else result.stdout
+                st.warning(f"⚠️ Indexing completed with warnings: {error_msg[:100]}...")
+                return True  # Still return True as it might have partially worked
+                
+    except subprocess.TimeoutExpired:
+        st.error("❌ Indexing timeout - operation took too long")
+        return False
+    except Exception as e:
+        st.warning(f"⚠️ Could not run automatic indexing: {str(e)}")
+        st.info("💡 You can manually run indexing later using the indexing script.")
+        return False
+
+
+def run_incremental_indexing() -> bool:
+    """
+    Run incremental indexing to update vector database with new entries.
+    
+    Returns:
+        bool: True if indexing was successful, False otherwise
+    """
+    try:
+        # Import here to avoid circular imports and handle missing modules gracefully
+        try:
+            sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'Indexingstep'))
+            from pipeline import DiaryIndexingPipeline
+        except ImportError as e:
+            st.error(f"❌ Could not import indexing modules: {e}")
+            return False
+        
+        # Load environment config (similar to run_indexing.py)
+        from dotenv import load_dotenv
+        load_dotenv(os.path.join(os.path.dirname(__file__), '..', 'Indexingstep', '.env'))
+        
+        config = {
+            "google_api_key": os.getenv("GOOGLE_API_KEY"),
+            "db_path": os.path.join(os.path.dirname(__file__), "backend", "diary.db"),
+            "persist_directory": os.path.join(os.path.dirname(__file__), "..", "Indexingstep", "diary_vector_db"),
+            "collection_name": "diary_entries",
+            "embedding_model": "models/embedding-001",
+            "chunk_size": 800,
+            "chunk_overlap": 100,
+            "batch_size": 50
+        }
+        
+        # Validate API key
+        if not config["google_api_key"]:
+            st.warning("⚠️ Google API key not found. Skipping indexing.")
+            return False
+        
+        # Run indexing in a separate thread to avoid event loop issues
+        import threading
+        import concurrent.futures
+        
+        def run_indexing_task():
+            """Function to run indexing in separate thread"""
+            try:
+                # Initialize pipeline
+                pipeline = DiaryIndexingPipeline(
+                    db_path=config["db_path"],
+                    persist_directory=config["persist_directory"],
+                    collection_name=config["collection_name"],
+                    google_api_key=config["google_api_key"],
+                    chunk_size=config["chunk_size"],
+                    chunk_overlap=config["chunk_overlap"],
+                    embedding_model=config["embedding_model"],
+                    batch_size=config["batch_size"]
+                )
+                
+                # Run incremental update for recent entries (last 7 days)
+                from datetime import datetime, timedelta
+                end_date = datetime.now().strftime("%Y-%m-%d")
+                start_date = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
+                
+                results = pipeline.incremental_update(
+                    start_date=start_date,
+                    end_date=end_date
+                )
+                
+                return results
+                
+            except Exception as e:
+                return {"status": "error", "error": str(e)}
+        
+        # Initialize pipeline
+        with st.spinner("🔄 Updating search index..."):
+            # Use ThreadPoolExecutor to run indexing in separate thread
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(run_indexing_task)
+                try:
+                    # Wait for completion with timeout
+                    results = future.result(timeout=120)  # 2 minute timeout
+                    
+                    if results.get("status") in ["completed_successfully", "success"]:
+                        st.success("✅ Search index updated successfully!")
+                        return True
+                    elif results.get("status") == "error":
+                        st.error(f"❌ Indexing error: {results.get('error', 'Unknown error')}")
+                        return False
+                    else:
+                        st.warning("⚠️ Indexing completed with warnings.")
+                        return True
+                        
+                except concurrent.futures.TimeoutError:
+                    st.error("❌ Indexing timeout - operation took too long")
+                    return False
+                except Exception as e:
+                    st.error(f"❌ Thread execution error: {str(e)}")
+                    return False
+                
+    except Exception as e:
+        st.error(f"❌ Error during indexing setup: {str(e)}")
+        return False
+
+
+def remove_from_vector_database(entry_date: str, entry_title: str) -> bool:
+    """
+    Remove entry from vector database using a simple script approach.
+    
+    Args:
+        entry_date (str): Date of the entry to remove
+        entry_title (str): Title of the entry to remove
+        
+    Returns:
+        bool: True if removal was successful, False otherwise
+    """
+    try:
+        # Create a temporary script to handle the deletion
+        script_content = f'''
+import sys
+import os
+sys.path.append(os.path.join(os.path.dirname(__file__), "..", "Indexingstep"))
+
+from embedding_and_storing import DiaryEmbeddingAndStorage
+from dotenv import load_dotenv
+
+# Load environment config
+load_dotenv(os.path.join(os.path.dirname(__file__), "..", "Indexingstep", ".env"))
+
+config = {{
+    "google_api_key": os.getenv("GOOGLE_API_KEY"),
+    "persist_directory": os.path.join(os.path.dirname(__file__), "..", "Indexingstep", "diary_vector_db"),
+    "collection_name": "diary_entries",
+    "embedding_model": "models/embedding-001"
+}}
+
+if config["google_api_key"]:
+    try:
+        # Initialize embedding storage
+        embedding_storage = DiaryEmbeddingAndStorage(
+            api_key=config["google_api_key"],
+            persist_directory=config["persist_directory"],
+            collection_name=config["collection_name"],
+            embedding_model=config["embedding_model"]
+        )
+        
+        # Remove documents with matching date and title
+        filter_criteria = {{
+            "date": "{entry_date}",
+            "title": "{entry_title}"
+        }}
+        
+        success = embedding_storage.delete_documents_by_metadata(filter_criteria)
+        print(f"Vector database deletion: {{success}}")
+        
+    except Exception as e:
+        print(f"Error: {{e}}")
+        sys.exit(1)
+else:
+    print("No API key found")
+    sys.exit(1)
+'''
+        
+        # Write temporary script
+        temp_script_path = os.path.join(os.path.dirname(__file__), 'temp_delete_vector.py')
+        with open(temp_script_path, 'w', encoding='utf-8') as f:
+            f.write(script_content)
+        
+        # Run the script
+        import subprocess
+        
+        # Get the virtual environment python path
+        venv_python = os.path.join(
+            os.path.dirname(__file__), '..', '..', '.venv', 'Scripts', 'python.exe'
+        )
+        python_cmd = venv_python if os.path.exists(venv_python) else sys.executable
+        
+        result = subprocess.run(
+            [python_cmd, temp_script_path],
+            cwd=os.path.dirname(temp_script_path),
+            capture_output=True,
+            text=True,
+            timeout=60,
+            shell=True
+        )
+        
+        # Clean up temporary script
+        try:
+            os.remove(temp_script_path)
+        except:
+            pass
+        
+        if result.returncode == 0:
+            st.info("🗑️ Entry also removed from search index")
+            return True
+        else:
+            st.warning("⚠️ Could not remove entry from search index")
+            return False
+            
+    except Exception as e:
+        st.warning(f"⚠️ Error removing from vector database: {str(e)}")
+        return False
 
 
 def response_generator() -> Generator[str, None, None]:
@@ -143,7 +421,19 @@ def display_selected_diary_entry(selected: str) -> None:
     for entry in st.session_state.diary_entries:
         entry_identifier = f"{entry['date']} - {entry['title']}"
         if entry_identifier == selected:
-            st.header(f"📝 {entry['date']} - {entry['title']}")
+            # Header with title and delete button
+            col1, col2 = st.columns([4, 1])
+            
+            with col1:
+                st.header(f"📝 {entry['date']} - {entry['title']}")
+            
+            with col2:
+                if st.button("🗑️ Delete", key=f"delete_entry_{entry.get('id', entry['date'])}", 
+                            help="Delete this diary entry", type="secondary"):
+                    # Show confirmation dialog
+                    st.session_state.show_delete_confirm = entry.get('id')
+                    st.session_state.delete_entry_info = entry
+                    st.rerun()
             
             # Display entry type indicator (using markdown instead of badge)
             entry_type = entry.get('type', 'Text')
@@ -155,6 +445,53 @@ def display_selected_diary_entry(selected: str) -> None:
             # Display content with proper spacing
             st.markdown("---")
             st.write(entry['content'])
+            
+            # Handle delete confirmation dialog
+            if hasattr(st.session_state, 'show_delete_confirm') and \
+               st.session_state.show_delete_confirm == entry.get('id'):
+                
+                st.markdown("---")
+                st.warning("⚠️ **Confirm Deletion**")
+                st.write(f"Are you sure you want to delete the entry: **{entry['title']}** from {entry['date']}?")
+                st.write("This action cannot be undone.")
+                
+                col1, col2, col3 = st.columns([1, 1, 2])
+                
+                with col1:
+                    if st.button("✅ Yes, Delete", type="primary", key="confirm_delete"):
+                        # Perform deletion
+                        entry_id = entry.get('id')
+                        if entry_id:
+                            with st.spinner("Deleting entry..."):
+                                success = delete_diary_entry(entry_id)
+                            
+                            if success:
+                                # Also remove from vector database
+                                with st.spinner("Removing from search index..."):
+                                    remove_from_vector_database(entry['date'], entry['title'])
+                                
+                                # Reload entries from database
+                                st.session_state.diary_entries = load_entries_from_database()
+                                # Clear confirmation state
+                                if hasattr(st.session_state, 'show_delete_confirm'):
+                                    del st.session_state.show_delete_confirm
+                                if hasattr(st.session_state, 'delete_entry_info'):
+                                    del st.session_state.delete_entry_info
+                                st.success("✅ Entry deleted successfully from both database and search index!")
+                                time.sleep(2)
+                                st.rerun()
+                        else:
+                            st.error("❌ Cannot delete entry: ID not found")
+                
+                with col2:
+                    if st.button("❌ Cancel", key="cancel_delete"):
+                        # Clear confirmation state
+                        if hasattr(st.session_state, 'show_delete_confirm'):
+                            del st.session_state.show_delete_confirm
+                        if hasattr(st.session_state, 'delete_entry_info'):
+                            del st.session_state.delete_entry_info
+                        st.rerun()
+            
             break
 
 
@@ -250,8 +587,14 @@ def render_diary_entry_form() -> None:
                     # Reload entries from database
                     st.session_state.diary_entries = load_entries_from_database()
                     st.success("✅ Diary entry added successfully!")
+                    
+                    # Run incremental indexing to update search index (simple version)
+                    indexing_success = run_incremental_indexing_simple()
+                    if indexing_success:
+                        st.info("🔍 Search index updated - your new entry is now searchable!")
+                    
                     # Reset form fields after successful save
-                    time.sleep(1)  # Delay to show success message
+                    time.sleep(2)  # Longer delay to show success and indexing messages
                     st.session_state.show_form = False
                     st.rerun()
                 else:

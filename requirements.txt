@@ -1,2 +1,12 @@
 streamlit == 1.48.0
 streamlit-webrtc
+fastapi
+uvicorn
+chromadb
+langchain-community 
+sqlite3
+langchain-google-genai
+langchain
+langchain-text-splitters
+python-dotenv
+google-generativeai

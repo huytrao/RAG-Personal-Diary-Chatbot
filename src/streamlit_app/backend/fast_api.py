@@ -136,6 +136,60 @@ async def get_diary_entries():
         print(traceback.format_exc())
         raise HTTPException(status_code=500, detail=error_msg)
 
+@app.delete("/entries/{entry_id}")
+async def delete_diary_entry(entry_id: int):
+    """Delete a diary entry by ID"""
+    try:
+        print(f"Attempting to delete entry with ID: {entry_id}")
+        
+        # Initialize database
+        init_db_if_not_exists()
+        
+        # Check if database file exists
+        if not os.path.exists(DB_PATH):
+            print("Database file doesn't exist")
+            raise HTTPException(status_code=404, detail="Database not found")
+        
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        # Check if entry exists
+        cursor.execute("SELECT id FROM diary_entries WHERE id = ?", (entry_id,))
+        if not cursor.fetchone():
+            conn.close()
+            print(f"Entry with ID {entry_id} not found")
+            raise HTTPException(status_code=404, detail="Entry not found")
+        
+        # Delete the entry
+        cursor.execute("DELETE FROM diary_entries WHERE id = ?", (entry_id,))
+        conn.commit()
+        
+        if cursor.rowcount == 0:
+            conn.close()
+            print(f"No entry was deleted for ID {entry_id}")
+            raise HTTPException(status_code=404, detail="Entry not found")
+        
+        conn.close()
+        print(f"Entry {entry_id} deleted successfully")
+        
+        return {
+            "message": "Diary entry deleted successfully",
+            "deleted_id": entry_id
+        }
+        
+    except HTTPException:
+        raise  # Re-raise HTTP exceptions as-is
+    except sqlite3.Error as e:
+        error_msg = f"Database error: {str(e)}"
+        print(error_msg)
+        print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=error_msg)
+    except Exception as e:
+        error_msg = f"Unexpected error: {str(e)}"
+        print(error_msg)
+        print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=error_msg)
+
 # Initialize database on startup
 @app.on_event("startup")
 async def startup_event():

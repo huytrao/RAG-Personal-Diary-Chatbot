@@ -123,6 +123,51 @@ def load_entries_from_database() -> List[Dict[str, Any]]:
         st.error(f"Error loading entries: {str(e)}")
         return get_sample_data()
 
+def delete_diary_entry(entry_id: int) -> bool:
+    """
+    Delete a diary entry from the database via FastAPI.
+    
+    Args:
+        entry_id (int): The ID of the entry to delete
+        
+    Returns:
+        bool: True if deletion was successful, False otherwise
+    """
+    try:
+        # Check API connection first
+        if not check_api_connection():
+            st.error("❌ API server is not running. Cannot delete entry.")
+            return False
+        
+        response = requests.delete(
+            f"{API_BASE_URL}/entries/{entry_id}",
+            timeout=10
+        )
+        
+        if response.status_code == 200:
+            st.success("✅ Diary entry deleted successfully!")
+            return True
+        elif response.status_code == 404:
+            st.error("❌ Entry not found. It may have already been deleted.")
+            return False
+        else:
+            try:
+                error_detail = response.json().get('detail', 'Unknown error')
+            except:
+                error_detail = response.text
+            st.error(f"❌ Delete failed: {response.status_code} - {error_detail}")
+            return False
+            
+    except requests.exceptions.ConnectionError:
+        st.error("❌ Cannot connect to API. Make sure FastAPI server is running.")
+        return False
+    except requests.exceptions.RequestException as e:
+        st.error(f"❌ Connection Error: {str(e)}")
+        return False
+    except Exception as e:
+        st.error(f"❌ Unexpected Error: {str(e)}")
+        return False
+
 def get_sample_data() -> List[Dict[str, Any]]:
     """Return sample diary entries when database is not available"""
     return [
