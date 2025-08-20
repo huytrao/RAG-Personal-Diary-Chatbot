@@ -1,2 +1,0 @@
-cd src/streamlit_app/backend
-uvicorn fast_api:app --host 0.0.0.0 --port 8000 --reload

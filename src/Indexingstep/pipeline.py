@@ -29,7 +29,8 @@ class DiaryIndexingPipeline:
         chunk_size: int = 300,  # Optimized for diary entries (200-300 tokens)
         chunk_overlap: int = 50,  # 50-token sliding window
         embedding_model: str = "models/embedding-001",
-        batch_size: int = 50
+        batch_size: int = 50,
+        user_id: int = 1
     ):
         """
         Initialize the enhanced diary indexing pipeline.
@@ -43,11 +44,13 @@ class DiaryIndexingPipeline:
             chunk_overlap (int): Overlap between chunks (sliding window)
             embedding_model (str): Google embedding model name
             batch_size (int): Batch size for processing
+            user_id (int): ID of the user for user-specific isolation
         """
         self.db_path = db_path
         self.persist_directory = persist_directory
         self.collection_name = collection_name
         self.batch_size = batch_size
+        self.user_id = user_id
         
         # Validate database exists
         if not os.path.exists(db_path):
@@ -74,7 +77,8 @@ class DiaryIndexingPipeline:
             db_path=self.db_path,
             table_name="diary_entries",
             content_column="content",
-            date_column="date"
+            date_column="date",
+            user_id=self.user_id
         )
         
         # 2. Content Preprocessor
@@ -93,9 +97,9 @@ class DiaryIndexingPipeline:
         
         # 4. Embedding and Storage
         self.embedding_storage = DiaryEmbeddingAndStorage(
+            user_id=self.user_id,
             api_key=google_api_key,
-            persist_directory=self.persist_directory,
-            collection_name=self.collection_name,
+            base_persist_directory=self.persist_directory,
             embedding_model=embedding_model,
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap
@@ -401,7 +405,7 @@ def main():
     
     # Configuration
     config = {
-        "db_path": "../streamlit_app/diary.db",  # Adjust path as needed
+        "db_path": "../streamlit_app/backend/diary.db",  # Adjust path as needed
         "persist_directory": "./diary_vector_db",
         "collection_name": "diary_entries",
         "google_api_key": None,  # Set your API key or use environment variable

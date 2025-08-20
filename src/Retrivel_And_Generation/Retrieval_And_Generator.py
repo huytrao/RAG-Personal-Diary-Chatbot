@@ -48,27 +48,34 @@ class DiaryRAGSystem:
     
     def __init__(
         self,
-        vector_db_path: str = "./src/Indexingstep/diary_vector_db_enhanced",
-        collection_name: str = "diary_entries",
+        user_id: int = 1,
+        base_vector_path: str = "./src/VectorDB",
         google_api_key: Optional[str] = None,
         embedding_model: str = "models/embedding-001",
-        chat_model: str = "gemini-2.0-flash-exp",
+        chat_model: str = "gemini-2.5-flash-exp",
         max_retrieval_docs: int = 5
     ):
         """
-        Initialize the RAG system.
+        Initialize the RAG system with user-specific vector database.
         
         Args:
-            vector_db_path: Path to the Chroma vector database
-            collection_name: Name of the collection in vector database
+            user_id: User ID for user-specific vector database
+            base_vector_path: Base path for vector databases
             google_api_key: Google API key for embeddings and chat
             embedding_model: Model for text embeddings
             chat_model: Model for chat completion
             max_retrieval_docs: Maximum number of documents to retrieve
         """
-        self.vector_db_path = vector_db_path
-        self.collection_name = collection_name
+        self.user_id = user_id
+        self.base_vector_path = base_vector_path
+        
+        # Create user-specific paths
+        self.vector_db_path = os.path.join(base_vector_path, f"user_{user_id}_vector_db")
+        self.collection_name = f"user_{user_id}_diary_entries"
         self.max_retrieval_docs = max_retrieval_docs
+        
+        # Ensure user vector database directory exists
+        os.makedirs(self.vector_db_path, exist_ok=True)
         
         # Set up Google API key
         if google_api_key:
@@ -131,25 +138,58 @@ class DiaryRAGSystem:
                     embedding_function=self.embeddings,
                     collection_name=self.collection_name
                 )
-                
-                # Test the connection
                 collection_info = self.vector_store._collection.count()
-                logger.info(f"Connected to vector database with {collection_info} documents")
-                
+                logger.info(f"Connected to vector database (primary) with {collection_info} documents")
+                # Fallback: legacy nested path if empty
+                if collection_info == 0:
+                    nested_path = os.path.join(self.vector_db_path, os.path.basename(self.vector_db_path))
+                    if os.path.isdir(nested_path):
+                        try:
+                            nested_vs = Chroma(
+                                persist_directory=nested_path,
+                                embedding_function=self.embeddings,
+                                collection_name=self.collection_name
+                            )
+                            nested_count = nested_vs._collection.count()
+                            if nested_count > 0:
+                                logger.warning(
+                                    f"Primary path empty. Switching to legacy nested path {nested_path} with {nested_count} docs"
+                                )
+                                self.vector_store = nested_vs
+                                self.vector_db_path = nested_path
+                        except Exception as ne:
+                            logger.debug(f"Failed to read nested path: {ne}")
             else:
                 logger.warning(f"Vector database not found at {self.vector_db_path}")
-                logger.info("You may need to run the indexing pipeline first")
-                
+                logger.info("Run indexing pipeline first.")
         except Exception as e:
             logger.error(f"Failed to setup vector store: {str(e)}")
-            raise
+            self.vector_store = None
+
+    def reload_vector_store(self) -> int:
+        """Reload vector store from disk. Returns new document count or 0."""
+        try:
+            self._setup_vector_store()
+            if self.vector_store:
+                return self.vector_store._collection.count()
+        except Exception as e:
+            logger.warning(f"reload_vector_store failed: {e}")
+        return 0
+
+    def get_document_count(self) -> int:
+        try:
+            if self.vector_store:
+                return self.vector_store._collection.count()
+        except Exception:
+            pass
+        return 0
     
     def _setup_prompts(self):
         """Set up prompt templates for different scenarios."""
         
         # Main RAG prompt template
         self.rag_prompt = ChatPromptTemplate.from_template("""
-Bạn là một trợ lý AI thông minh và thấu hiểu, chuyên về việc phân tích và thảo luận nội dung nhật ký cá nhân.
+Bạn là một trợ lý AI thông minh và thấu hiểu, chuyên về việc phân tích và thảo luận nội dung về nhật ký cá nhân.
 
 Dựa trên các mục nhật ký sau đây được tìm kiếm từ cơ sở dữ liệu:
 
@@ -176,7 +216,7 @@ Bạn là một trợ lý AI thân thiện và hữu ích cho việc quản lý 
 Người dùng hỏi: {question}
 
 Vì không tìm thấy thông tin liên quan trong nhật ký hiện tại, hãy:
-- Trả lời một cách thân thiện và hữu ích
+- Trả lời một cách thân thiện ngắn gọn và hữu ích
 - Đề xuất cách người dùng có thể ghi nhật ký về chủ đề này
 - Khuyến khích reflection và self-discovery
 - Cung cấp general guidance nếu phù hợp
@@ -616,37 +656,45 @@ Trả lời ngắn (1-2 câu):"""
 # ========================================
 
 def create_rag_system(
-    vector_db_path: str = "./src/Indexingstep/diary_vector_db_enhanced",
+    user_id: int = 1,
+    base_vector_path: str = "./src/Indexingstep",
     google_api_key: Optional[str] = None
 ) -> DiaryRAGSystem:
     """
-    Create and initialize a DiaryRAGSystem instance.
+    Create and initialize a user-specific DiaryRAGSystem instance.
     
     Args:
-        vector_db_path: Path to vector database
+        user_id: User ID for user-specific vector database
+        base_vector_path: Base path for vector databases
         google_api_key: Google API key
         
     Returns:
-        Initialized DiaryRAGSystem
+        Initialized DiaryRAGSystem for the specific user
     """
     return DiaryRAGSystem(
-        vector_db_path=vector_db_path,
+        user_id=user_id,
+        base_vector_path=base_vector_path,
         google_api_key=google_api_key
     )
 
-def quick_query(query: str, vector_db_path: str = "./src/Indexingstep/diary_vector_db_enhanced") -> str:
+def quick_query(
+    query: str, 
+    user_id: int = 1,
+    base_vector_path: str = "./src/VectorDB"
+) -> str:
     """
-    Quick query function for testing.
+    Quick query function for testing with user-specific database.
     
     Args:
         query: Question to ask
-        vector_db_path: Path to vector database
+        user_id: User ID for user-specific vector database
+        base_vector_path: Base path for vector databases
         
     Returns:
         Response string
     """
     try:
-        rag = create_rag_system(vector_db_path)
+        rag = create_rag_system(user_id, base_vector_path)
         return rag.generate_response(query)
     except Exception as e:
         return f"Error: {str(e)}"

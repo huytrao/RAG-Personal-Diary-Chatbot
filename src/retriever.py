@@ -1,1 +1,0 @@
-# Document / data retrieval logical 

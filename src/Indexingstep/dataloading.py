@@ -23,7 +23,8 @@ class DiaryDataLoader(BaseLoader):
         content_column: str = "content",
         date_column: str = "date",
         tags_column: str = "tags",
-        id_column: str = "id"
+        id_column: str = "id",
+        user_id: int = 1
     ):
         """
         Initialize the DiaryDataLoader.
@@ -35,6 +36,7 @@ class DiaryDataLoader(BaseLoader):
             date_column (str): Name of the column containing entry dates
             tags_column (str): Name of the column containing entry tags
             id_column (str): Name of the column containing entry IDs
+            user_id (int): ID of the user for filtering diary entries
         """
         self.db_path = db_path
         self.table_name = table_name
@@ -42,6 +44,7 @@ class DiaryDataLoader(BaseLoader):
         self.date_column = date_column
         self.tags_column = tags_column
         self.id_column = id_column
+        self.user_id = user_id
     
     def _extract_tags_from_content(self, content: str) -> List[str]:
         """
@@ -192,10 +195,10 @@ class DiaryDataLoader(BaseLoader):
             # Build the SQL query with all required columns
             columns = [self.id_column, self.date_column, self.content_column, self.tags_column]
             
-            query = f"SELECT {', '.join(columns)} FROM {self.table_name} ORDER BY {self.date_column} DESC"
+            query = f"SELECT {', '.join(columns)} FROM {self.table_name} WHERE user_id = ? ORDER BY {self.date_column} DESC"
             
             # Execute the query
-            cursor.execute(query)
+            cursor.execute(query, (self.user_id,))
             rows = cursor.fetchall()
             
             logger.info(f"Loaded {len(rows)} diary entries from database")
@@ -298,11 +301,11 @@ class DiaryDataLoader(BaseLoader):
             query = f"""
                 SELECT {', '.join(columns)} 
                 FROM {self.table_name} 
-                WHERE {self.date_column} BETWEEN ? AND ?
+                WHERE user_id = ? AND {self.date_column} BETWEEN ? AND ?
                 ORDER BY {self.date_column}
             """
             
-            cursor.execute(query, (start_date, end_date))
+            cursor.execute(query, (self.user_id, start_date, end_date))
             rows = cursor.fetchall()
             
             logger.info(f"Loaded {len(rows)} diary entries from {start_date} to {end_date}")
@@ -468,6 +471,109 @@ class DiaryContentPreprocessor:
         
         logger.info(f"Preprocessed {len(documents)} documents, kept {len(preprocessed_docs)}")
         return preprocessed_docs
+    
+    def load_all_entries(self, user_id: int = None) -> List[Dict[str, Any]]:
+        """
+        Load all diary entries for a specific user.
+        
+        Args:
+            user_id: User ID to filter entries
+            
+        Returns:
+            List of diary entry dictionaries
+        """
+        if user_id is None:
+            user_id = self.user_id
+            
+        entries = []
+        
+        try:
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            
+            query = f"""
+                SELECT id, user_id, date, content, tags, created_at 
+                FROM {self.table_name} 
+                WHERE user_id = ? 
+                ORDER BY date DESC, created_at DESC
+            """
+            
+            cursor.execute(query, (user_id,))
+            rows = cursor.fetchall()
+            
+            for row in rows:
+                entries.append({
+                    'id': row['id'],
+                    'user_id': row['user_id'],
+                    'date': row['date'],
+                    'content': row['content'],
+                    'tags': row['tags'] or '',
+                    'created_at': row['created_at']
+                })
+            
+            conn.close()
+            logger.info(f"Loaded {len(entries)} entries for user {user_id}")
+            
+        except sqlite3.Error as e:
+            logger.error(f"Database error loading entries: {e}")
+            
+        return entries
+    
+    def load_entries_since(self, since_date, user_id: int = None) -> List[Dict[str, Any]]:
+        """
+        Load diary entries since a specific date.
+        
+        Args:
+            since_date: datetime object or ISO string
+            user_id: User ID to filter entries
+            
+        Returns:
+            List of diary entry dictionaries
+        """
+        if user_id is None:
+            user_id = self.user_id
+            
+        entries = []
+        
+        try:
+            # Convert datetime to string if needed
+            if hasattr(since_date, 'isoformat'):
+                since_str = since_date.isoformat()
+            else:
+                since_str = str(since_date)
+                
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            
+            query = f"""
+                SELECT id, user_id, date, content, tags, created_at 
+                FROM {self.table_name} 
+                WHERE user_id = ? AND created_at > ?
+                ORDER BY date DESC, created_at DESC
+            """
+            
+            cursor.execute(query, (user_id, since_str))
+            rows = cursor.fetchall()
+            
+            for row in rows:
+                entries.append({
+                    'id': row['id'],
+                    'user_id': row['user_id'],
+                    'date': row['date'],
+                    'content': row['content'],
+                    'tags': row['tags'] or '',
+                    'created_at': row['created_at']
+                })
+            
+            conn.close()
+            logger.info(f"Loaded {len(entries)} entries since {since_str} for user {user_id}")
+            
+        except sqlite3.Error as e:
+            logger.error(f"Database error loading entries since {since_date}: {e}")
+            
+        return entries
 
 # Example usage
 if __name__ == "__main__":

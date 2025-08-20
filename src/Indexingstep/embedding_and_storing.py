@@ -48,20 +48,20 @@ class DiaryEmbeddingAndStorage:
     
     def __init__(
         self,
+        user_id: int = 1,
         api_key: Optional[str] = None,
-        persist_directory: str = "./chroma_db",
-        collection_name: str = "diary_collection",
+        base_persist_directory: str = "./",
         embedding_model: str = "models/embedding-001",
         chunk_size: int = 1000,
         chunk_overlap: int = 200
     ):
         """
-        Initialize the embedding and storage system.
+        Initialize the embedding and storage system with user-specific database.
         
         Args:
+            user_id (int): User ID for user-specific vector database
             api_key (str, optional): Google API key for embeddings
-            persist_directory (str): Directory to persist the vector database
-            collection_name (str): Name of the Chroma collection
+            base_persist_directory (str): Base directory for vector databases
             embedding_model (str): Google embedding model to use
             chunk_size (int): Size of text chunks for embedding
             chunk_overlap (int): Overlap between chunks
@@ -72,8 +72,13 @@ class DiaryEmbeddingAndStorage:
         elif "GOOGLE_API_KEY" not in os.environ:
             raise ValueError("Google API key must be provided either as parameter or environment variable")
         
-        self.persist_directory = persist_directory
-        self.collection_name = collection_name
+        self.user_id = user_id
+        self.base_persist_directory = base_persist_directory
+        
+        # Create user-specific paths
+        self.persist_directory = os.path.join(base_persist_directory, f"user_{user_id}_vector_db")
+        self.collection_name = f"user_{user_id}_diary_entries"
+        
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
         
@@ -82,7 +87,7 @@ class DiaryEmbeddingAndStorage:
             self.embeddings = GoogleGenerativeAIEmbeddings(
                 model=embedding_model
             )
-            logger.info(f"Initialized Google embeddings with model: {embedding_model}")
+            # logger.info(f"Initialized Google embeddings with model: {embedding_model}")
         except Exception as e:
             logger.error(f"Failed to initialize embeddings: {e}")
             raise
@@ -104,7 +109,7 @@ class DiaryEmbeddingAndStorage:
                 persist_directory=self.persist_directory
             )
             
-            logger.info(f"Vector store initialized with persist directory: {self.persist_directory}")
+            # logger.info(f"Vector store initialized with persist directory: {self.persist_directory}")
             
         except Exception as e:
             logger.error(f"Failed to setup vector store: {e}")
@@ -190,13 +195,15 @@ class DiaryEmbeddingAndStorage:
                 metadatas=filtered_metadatas
             )
             
-            # Persist the vector store
-            self.vector_store.persist()
-            
+            # ChromaDB auto-persists in newer versions
             logger.info(f"Successfully embedded and stored {len(texts)} text documents")
             return document_ids
             
         except Exception as e:
+            print(f"DEBUG: Error in embed_and_store_texts: {e}")
+            print(f"DEBUG: Error type: {type(e)}")
+            import traceback
+            traceback.print_exc()
             logger.error(f"Failed to embed and store texts: {e}")
             raise
     
@@ -295,7 +302,7 @@ class DiaryEmbeddingAndStorage:
         """
         try:
             self.vector_store.delete(ids=ids)
-            self.vector_store.persist()
+            # ChromaDB auto-persists in newer versions
             
             logger.info(f"Successfully deleted {len(ids)} documents")
             return True
@@ -334,7 +341,7 @@ class DiaryEmbeddingAndStorage:
             
             if ids_to_delete:
                 self.vector_store.delete(ids=ids_to_delete)
-                self.vector_store.persist()
+                # ChromaDB auto-persists in newer versions
                 logger.info(f"Successfully deleted {len(ids_to_delete)} documents matching criteria: {filter_criteria}")
                 return True
             else:
@@ -359,7 +366,7 @@ class DiaryEmbeddingAndStorage:
             
             if all_ids:
                 self.vector_store.delete(ids=all_ids)
-                self.vector_store.persist()
+                # ChromaDB auto-persists in newer versions
                 logger.info(f"Cleared {len(all_ids)} documents from collection")
             else:
                 logger.info("Collection is already empty")

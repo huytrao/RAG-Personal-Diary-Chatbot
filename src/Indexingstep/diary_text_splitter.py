@@ -190,3 +190,52 @@ class DiaryTextSplitter:
             "avg_chunk_size_tokens": round(avg_tokens, 2),
             "chunking_ratio": round(total_chunks / unique_entries, 2) if unique_entries > 0 else 0
         }
+    
+    def split_diary_entry(self, entry: Dict[str, Any]) -> List[Document]:
+        """
+        Split a single diary entry into document chunks.
+        
+        Args:
+            entry: Dictionary containing diary entry data
+            
+        Returns:
+            List of Document objects
+        """
+        # Create Document from entry
+        content = entry.get('content', '')
+        
+        # Extract title from content if it's in structured format
+        title = ""
+        actual_content = content
+        
+        if content.startswith("Title: "):
+            lines = content.split('\n')
+            for line in lines:
+                if line.startswith("Title: "):
+                    title = line.replace("Title: ", "").strip()
+                elif line.startswith("Content: "):
+                    actual_content = line.replace("Content: ", "").strip()
+        
+        # Create metadata
+        metadata = {
+            "entry_id": str(entry.get('id', 'unknown')),
+            "user_id": entry.get('user_id', 1),
+            "date": entry.get('date', ''),
+            "tags": entry.get('tags', ''),
+            "created_at": entry.get('created_at', ''),
+            "type": "diary_entry",
+            "content_length": len(actual_content),
+            "word_count": len(actual_content.split())
+        }
+        
+        if title:
+            metadata["title"] = title
+        
+        # Create Document
+        doc = Document(
+            page_content=actual_content,
+            metadata=metadata
+        )
+        
+        # Split using the existing split_documents method
+        return self.split_documents([doc])
