@@ -139,74 +139,21 @@ def render_ai_status_widget(user_id: int):
         st.warning("⚠️ AI Assistant is partially available")
     elif overall_status == "unavailable":
         st.error("❌ AI Assistant is unavailable")
+    elif overall_status == "not_configured":
+        st.warning("⚠️ AI Assistant needs configuration")
+    elif overall_status == "needs_indexing":
+        st.info("ℹ️ AI Assistant needs initial indexing")
+    elif overall_status == "empty_database":
+        st.warning("⚠️ AI Assistant has no documents to search")
+    elif overall_status == "checking":
+        st.info("🔄 Checking AI Assistant status...")
+    elif overall_status == "error":
+        error_msg = status.get('error', 'Unknown error')
+        st.error(f"❌ AI Assistant error: {error_msg}")
     else:
-        st.error(f"❌ Unknown status: {status.get('error', 'Unknown error')}")
-    
-    # Detailed status breakdown
-    if "details" in status:
-        details = status["details"]
-        
-        with st.expander("🔍 Detailed Diagnostics", expanded=(overall_status != "available")):
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.markdown("**Core Components:**")
-                # RAG Modules
-                rag_status = details.get("rag_modules", {})
-                if rag_status.get("available"):
-                    st.markdown("✅ RAG modules loaded")
-                else:
-                    st.markdown(f"❌ RAG modules: {rag_status.get('error', 'Unknown error')}")
-                
-                # Google API Key
-                api_status = details.get("google_api_key", {})
-                if api_status.get("available"):
-                    st.markdown("✅ Google API key configured")
-                else:
-                    st.markdown(f"❌ Google API: {api_status.get('error', 'Not configured')}")
-            
-            with col2:
-                st.markdown("**User Data:**")
-                # Vector Database
-                vector_status = details.get("vector_database", {})
-                if vector_status.get("available"):
-                    st.markdown("✅ Vector database ready")
-                else:
-                    st.markdown(f"❌ Vector DB: {vector_status.get('error', 'Not found')}")
-                
-                # Document Count
-                doc_status = details.get("document_count", {})
-                if doc_status.get("available"):
-                    count = doc_status.get("count", 0)
-                    st.markdown(f"✅ {count} documents indexed")
-                else:
-                    st.markdown("❌ No documents indexed")
-            
-            # Issues and fixes
-            issues = status.get("issues", [])
-            if issues:
-                st.markdown("**Issues Found:**")
-                for issue in issues:
-                    st.markdown(f"⚠️ {issue}")
-            
-            fixes = status.get("suggested_fixes", [])
-            if fixes:
-                st.markdown("**Suggested Actions:**")
-                for fix in fixes:
-                    st.markdown(f"🔧 {fix}")
-                
-                # Auto-fix button
-                if st.button("🔧 Attempt Auto-Fix", type="primary"):
-                    with st.spinner("Fixing AI availability issues..."):
-                        fix_result = fix_ai_availability(user_id)
-                        
-                        if fix_result.get("status") == "success":
-                            st.success("✅ AI availability issues fixed!")
-                            if fix_result.get("actions_taken"):
-                                st.info("Actions taken: " + ", ".join(fix_result["actions_taken"]))
-                            st.rerun()
-                        else:
-                            st.error(f"❌ Fix failed: {fix_result.get('error', 'Unknown error')}")
+        st.warning(f"⚠️ Unknown AI status: {overall_status}")
+        if 'error' in status:
+            st.error(f"Details: {status.get('error', 'No details available')}")
 
 def initialize_rag_system():
     """Initialize RAG system using service."""
@@ -377,6 +324,48 @@ def handle_chat_input() -> None:
         
         st.session_state.messages.append({"role": "assistant", "content": response})
 
+def handle_entry_action(prompt):
+    """Handle entry action prompts - similar to chat but for entry analysis."""
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    
+    # Switch to main area to show the response
+    st.session_state.show_entry_actions = False
+    st.info(f"🔍 Analyzing: {prompt[:50]}...")
+    st.rerun()
+
+def check_and_sync_entries():
+    """Check and sync entries with RAG system."""
+    current_user_id = getattr(st.session_state, 'current_user_id', 1)
+    
+    try:
+        if not check_rag_service():
+            st.sidebar.error("❌ RAG service offline")
+            return
+        
+        with st.sidebar.spinner("🔄 Checking sync status..."):
+            # Get current status
+            status = rag_client.get_user_status(current_user_id)
+            doc_count = status.get("document_count", 0)
+            
+            # Count actual diary entries
+            actual_count = len(st.session_state.diary_entries)
+            
+            if doc_count != actual_count:
+                st.sidebar.warning(f"⚠️ Sync issue: {doc_count} indexed vs {actual_count} entries")
+                
+                if st.sidebar.button("🔄 Fix Sync", key="fix_sync_btn"):
+                    with st.sidebar.spinner("🔄 Re-syncing..."):
+                        result = rag_client.index_user_data(current_user_id, clear_existing=True)
+                        if result.get("status") == "success":
+                            st.sidebar.success(f"✅ Synced {result.get('documents_processed', 0)} documents")
+                        else:
+                            st.sidebar.error("❌ Sync failed")
+            else:
+                st.sidebar.success(f"✅ Sync OK: {doc_count} documents")
+                
+    except Exception as e:
+        st.sidebar.error(f"❌ Sync check error: {str(e)}")
+
 def render_sidebar() -> str:
     """Render sidebar with diary list and controls."""
     st.sidebar.header("📖 Diary List")
@@ -424,6 +413,53 @@ def render_sidebar() -> str:
             diary_options.append(option_str)
         
         selected = st.sidebar.radio("Select Entry:", options=diary_options)
+        
+        # Enhanced Entry Actions Menu
+        if st.sidebar.button("➕ Entry Actions", key="entry_actions_btn"):
+            st.session_state.show_entry_actions = not st.session_state.get('show_entry_actions', False)
+            st.rerun()
+        
+        # Show entry actions menu if toggled
+        if st.session_state.get('show_entry_actions', False):
+            with st.sidebar.expander("📋 Entry Actions", expanded=True):
+                st.markdown("**📊 Analysis Actions:**")
+                
+                col1, col2 = st.sidebar.columns(2)
+                with col1:
+                    if st.button("📈 Trends", use_container_width=True, key="trends_btn"):
+                        handle_entry_action("Phân tích xu hướng và thay đổi trong các mục nhật ký của tôi theo thời gian. Có những pattern nào đáng chú ý?")
+                    if st.button("🏷️ Tags Analysis", use_container_width=True, key="tags_analysis_btn"):
+                        handle_entry_action("Phân tích các tags trong nhật ký của tôi. Những chủ đề nào tôi viết nhiều nhất?")
+                    if st.button("📅 Timeline", use_container_width=True, key="timeline_btn"):
+                        handle_entry_action("Tạo timeline của các sự kiện quan trọng trong nhật ký của tôi.")
+                
+                with col2:
+                    if st.button("🔍 Search", use_container_width=True, key="search_btn"):
+                        handle_entry_action("Tìm kiếm thông tin cụ thể trong tất cả các mục nhật ký của tôi.")
+                    if st.button("📝 Summary", use_container_width=True, key="summary_btn"):
+                        handle_entry_action("Tóm tắt nội dung chính của tất cả các mục nhật ký trong thời gian gần đây.")
+                    if st.button("🔗 Connections", use_container_width=True, key="connections_btn"):
+                        handle_entry_action("Tìm ra mối liên hệ và patterns giữa các mục nhật ký khác nhau.")
+                
+                st.markdown("**🛠️ Management Actions:**")
+                
+                col3, col4 = st.sidebar.columns(2)
+                with col3:
+                    if st.button("🏷️ Auto Tag", use_container_width=True, key="auto_tag_btn"):
+                        st.info("Auto-tagging feature coming soon!")
+                    if st.button("📊 Stats", use_container_width=True, key="stats_btn"):
+                        handle_entry_action("Hiển thị thống kê chi tiết về nhật ký của tôi: số lượng entry, từ khóa phổ biến, frequency...")
+                
+                with col4:
+                    if st.button("🔄 Sync Check", use_container_width=True, key="sync_check_btn"):
+                        check_and_sync_entries()
+                    if st.button("📈 Export", use_container_width=True, key="export_btn"):
+                        st.info("Export feature coming soon!")
+                
+                # Close menu button
+                if st.button("❌ Close", use_container_width=True, key="close_entry_actions"):
+                    st.session_state.show_entry_actions = False
+                    st.rerun()
     
     # AI Status
     st.sidebar.markdown("---")
@@ -462,6 +498,82 @@ def render_sidebar() -> str:
         if service_running and st.sidebar.button("🔄 Retry Initialize"):
             st.session_state.rag_system_status = "ready_to_initialize"
             st.rerun()
+    
+    # Detailed AI Diagnostics
+    st.sidebar.markdown("---")
+    current_user_id = getattr(st.session_state, 'current_user_id', 1)
+    
+    with st.sidebar.expander("🔍 Detailed Diagnostics"):
+        if service_running and rag_client:
+            try:
+                status = check_ai_availability_detailed(current_user_id)
+                overall_status = status.get("overall_status", "unknown")
+                
+                if "checks" in status:
+                    details = status["checks"]
+                    
+                    st.markdown("**Core Components:**")
+                    # RAG Modules
+                    rag_status = details.get("rag_modules", {})
+                    if rag_status.get("available"):
+                        st.markdown("✅ RAG modules loaded")
+                    else:
+                        st.markdown("❌ RAG modules: Not available")
+                    
+                    # Google API Key
+                    api_status = details.get("google_api_key", {})
+                    if api_status.get("configured"):
+                        st.markdown("✅ Google API key configured")
+                    else:
+                        st.markdown("❌ Google API: Not configured")
+                    
+                    st.markdown("**User Data:**")
+                    # Vector Database
+                    vector_status = details.get("vector_database", {})
+                    if vector_status.get("exists"):
+                        st.markdown("✅ Vector database ready")
+                    else:
+                        st.markdown("❌ Vector DB: Not found")
+                    
+                    # Document Count
+                    doc_status = details.get("document_count", {})
+                    count = doc_status.get("count", 0)
+                    if count > 0:
+                        st.markdown(f"✅ {count} documents indexed")
+                    else:
+                        st.markdown("❌ No documents indexed")
+                    
+                    # Issues and fixes
+                    issues = status.get("issues", [])
+                    if issues:
+                        st.markdown("**Issues Found:**")
+                        for issue in issues:
+                            st.markdown(f"⚠️ {issue}")
+                    
+                    fixes = status.get("suggested_fixes", [])
+                    if fixes:
+                        st.markdown("**Suggested Actions:**")
+                        for fix in fixes:
+                            st.markdown(f"🔧 {fix}")
+                        
+                        # Auto-fix button
+                        if st.button("🔧 Attempt Auto-Fix", type="primary", key="sidebar_autofix"):
+                            with st.spinner("Fixing AI availability issues..."):
+                                fix_result = fix_ai_availability(current_user_id)
+                                
+                                if fix_result.get("status") == "success":
+                                    st.success("✅ AI availability issues fixed!")
+                                    if fix_result.get("actions_taken"):
+                                        st.info("Actions taken: " + ", ".join(fix_result["actions_taken"]))
+                                    st.rerun()
+                                else:
+                                    st.error(f"❌ Fix failed: {fix_result.get('error', 'Unknown error')}")
+                else:
+                    st.warning("❌ Could not get detailed status")
+            except Exception as e:
+                st.error(f"❌ Diagnostics error: {str(e)}")
+        else:
+            st.warning("❌ RAG service not available")
     
     return selected
 
@@ -506,14 +618,49 @@ def display_selected_diary_entry(selected: str) -> None:
                 with col1:
                     if st.button("✅ Yes, Delete", type="primary"):
                         user_id = getattr(st.session_state, 'current_user_id', 1)
-                        success = delete_diary_entry(entry.get('id'), user_id)
                         
-                        if success:
-                            run_auto_sync(user_id)
-                            st.session_state.diary_entries = load_entries_from_database(user_id)
-                            del st.session_state.show_delete_confirm
-                            st.success("✅ Entry deleted!")
-                            st.rerun()
+                        with st.spinner("🗑️ Deleting entry and rebuilding search index..."):
+                            # Step 1: Delete the diary entry from database
+                            success = delete_diary_entry(entry.get('id'), user_id)
+                            
+                            if success:
+                                # Step 2: Delete vector database to ensure clean rebuild
+                                if rag_client and check_rag_service():
+                                    try:
+                                        st.info("🔄 Clearing vector database...")
+                                        delete_result = rag_client.delete_vector_db(user_id)
+                                        
+                                        if delete_result.get("status") == "success":
+                                            st.info("✅ Vector database cleared successfully")
+                                        else:
+                                            st.warning(f"⚠️ Vector DB deletion warning: {delete_result.get('error', 'Unknown')}")
+                                    
+                                    except Exception as e:
+                                        st.warning(f"⚠️ Could not clear vector database: {str(e)}")
+                                    
+                                    # Step 3: Full re-indexing of all remaining documents
+                                    st.info("🔄 Rebuilding search index from all remaining entries...")
+                                    try:
+                                        index_result = rag_client.index_user_data(user_id, clear_existing=True)
+                                        
+                                        if index_result.get("status") == "success":
+                                            docs_count = index_result.get('documents_processed', 0)
+                                            st.success(f"✅ Search index rebuilt with {docs_count} documents")
+                                        else:
+                                            st.warning(f"⚠️ Re-indexing failed: {index_result.get('error', 'Unknown error')}")
+                                    
+                                    except Exception as e:
+                                        st.error(f"❌ Re-indexing error: {str(e)}")
+                                else:
+                                    st.warning("⚠️ RAG service not available - entry deleted but search index not updated")
+                                
+                                # Step 4: Refresh UI
+                                st.session_state.diary_entries = load_entries_from_database(user_id)
+                                del st.session_state.show_delete_confirm
+                                st.success("✅ Entry deleted and search index rebuilt!")
+                                st.rerun()
+                            else:
+                                st.error("❌ Failed to delete diary entry")
                 
                 with col2:
                     if st.button("❌ Cancel"):

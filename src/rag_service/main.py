@@ -8,6 +8,7 @@ import uvicorn
 from datetime import datetime
 import json
 import logging
+from fastapi import Query
 
 # Load environment variables
 from dotenv import load_dotenv
@@ -30,7 +31,8 @@ except ImportError as e:
     RAG_MODULES_AVAILABLE = False
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(filename="logs/service.log",
+                    level=logging.INFO )
 logger = logging.getLogger(__name__)
 
 app = FastAPI(
@@ -99,6 +101,12 @@ class IndexResponse(BaseModel):
 # ========================================
 # HELPER FUNCTIONS
 # ========================================
+
+def format_error_message(errors) -> str:
+    """Convert error list to string for API response."""
+    if isinstance(errors, list):
+        return '; '.join(str(e) for e in errors)
+    return str(errors) if errors else 'Unknown error'
 
 def get_user_paths(user_id: int) -> Dict[str, str]:
     """Get all paths for a user."""
@@ -362,7 +370,7 @@ async def fix_ai_availability(user_id: int):
                 return {
                     "status": "fix_failed",
                     "reason": "Failed to create vector database",
-                    "error": results.get('errors', 'Unknown error')
+                    "error": format_error_message(results.get('errors', 'Unknown error'))
                 }
         else:
             return {
@@ -465,7 +473,7 @@ async def index_user_data(user_id: int, request: IndexRequest, background_tasks:
                 chunks_created=0,
                 vector_db_path=paths["vector_db_path"],
                 processing_time=processing_time,
-                error=results.get('errors', 'Unknown error')
+                error=format_error_message(results.get('errors', 'Unknown error'))
             )
             
     except Exception as e:
@@ -520,34 +528,35 @@ async def incremental_index(user_id: int, start_date: str = None):
         logger.error(f"Incremental indexing error for user {user_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/users/{user_id}/query", response_model=QueryResponse)
-async def query_user_rag(user_id: int, request: QueryRequest):
+@app.get("/users/{user_id}/query", response_model=QueryResponse)
+async def query_user_rag(
+    user_id: int,
+    query: str = Query(...),
+    fast_mode: bool = Query(False),
+    chat_history: str = Query("[]")
+):
     """Query RAG system for a user."""
     start_time = datetime.now()
-    
+    import json
+
     try:
-        # Get or create RAG system
         rag_system = get_or_create_rag_system(user_id)
-        
-        # Generate response
-        if request.fast_mode:
-            response = rag_system.generate_fast_response(query=request.query)
+        chat_history_list = json.loads(chat_history)
+        if fast_mode:
+            response = rag_system.generate_fast_response(query=query)
         else:
             response = rag_system.generate_contextual_response(
-                query=request.query,
-                chat_history=request.chat_history
+                query=query,
+                chat_history=chat_history_list
             )
-        
         processing_time = (datetime.now() - start_time).total_seconds()
-        
         return QueryResponse(
             user_id=user_id,
             response=response,
             processing_time=processing_time,
-            documents_used=5,  # Default retrieval count
-            fast_mode=request.fast_mode
+            documents_used=5,
+            fast_mode=fast_mode
         )
-        
     except HTTPException:
         raise
     except Exception as e:
@@ -587,7 +596,7 @@ async def auto_index_new_entry(user_id: int):
             else:
                 return {
                     "status": "failed",
-                    "error": results.get('errors', 'Unknown error')
+                    "error": format_error_message(results.get('errors', 'Unknown error'))
                 }
         else:
             # Incremental update for existing DB
@@ -627,7 +636,7 @@ async def auto_index_new_entry(user_id: int):
                 else:
                     return {
                         "status": "failed",
-                        "error": f"Both incremental and full rebuild failed: {results.get('errors', 'Unknown error')}"
+                        "error": f"Both incremental and full rebuild failed: {format_error_message(results.get('errors', 'Unknown error'))}"
                     }
                 
     except Exception as e:

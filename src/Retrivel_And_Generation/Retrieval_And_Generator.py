@@ -52,7 +52,7 @@ class DiaryRAGSystem:
         base_vector_path: str = "./src/VectorDB",
         google_api_key: Optional[str] = None,
         embedding_model: str = "models/embedding-001",
-        chat_model: str = "gemini-2.5-flash-exp",
+        chat_model: str = "gemini-2.5-flash-lite",
         max_retrieval_docs: int = 5
     ):
         """
@@ -399,31 +399,32 @@ Nội dung: {doc.page_content.strip()}
             AI response string (optimized for speed)
         """
         try:
-            # Fast retrieval with only 2 most relevant docs
+            # Fast retrieval with only 1 most relevant doc for maximum speed
             relevant_docs = self.retrieve_relevant_entries(
                 query=query, 
                 filters=filters,
-                k=2  # Only 2 docs for maximum speed
+                k=1  # Only 1 doc for maximum speed
             )
             
             if not relevant_docs:
-                return self.fallback_chain.invoke(query)
+                # Use simple fallback without chain to avoid timeout
+                return "Xin lỗi, tôi không tìm thấy thông tin liên quan trong nhật ký của bạn."
             
-            # Create concise context
-            context = self.format_documents_for_context(relevant_docs[:2])  # Only use top 2
+            # Create very concise context (limit content length)
+            context = self._format_docs(relevant_docs[:1])
+            if len(context) > 500:  # Limit context length
+                context = context[:500] + "..."
             
-            # Fast prompt template
+            # Fast prompt template with timeout optimization
             fast_prompt = ChatPromptTemplate.from_template(
-                """Dựa vào thông tin nhật ký sau, trả lời ngắn gọn và súc tích:
-
-{context}
+                """Dựa vào nhật ký: {context}
 
 Câu hỏi: {question}
 
-Trả lời ngắn (1-2 câu):"""
+Trả lời ngắn (1 câu):"""
             )
             
-            # Create optimized chain
+            # Create optimized chain with pre-computed context
             chain = (
                 {"context": lambda x: context, "question": RunnablePassthrough()}
                 | fast_prompt
@@ -431,14 +432,15 @@ Trả lời ngắn (1-2 câu):"""
                 | StrOutputParser()
             )
             
-            # Generate response
+            # Generate response with timeout handling
             response = chain.invoke(query)
             logger.info("Generated fast response successfully")
             return response.strip()
             
         except Exception as e:
             logger.error(f"Error in fast response generation: {str(e)}")
-            return self.fallback_chain.invoke(query)
+            # Direct fallback without chain to avoid timeout
+            return "Xin lỗi, tôi gặp lỗi khi xử lý câu hỏi của bạn."
 
     def generate_response(
         self, 
@@ -634,7 +636,7 @@ Trả lời ngắn (1-2 câu):"""
             "vector_db_path": self.vector_db_path,
             "models_initialized": True,
             "embedding_model": "models/embedding-001",
-            "chat_model": "gemini-2.0-flash-exp"
+            "chat_model": "gemini-1.5-flash"
         }
         
         if self.vector_store:

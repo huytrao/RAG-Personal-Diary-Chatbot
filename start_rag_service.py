@@ -9,7 +9,7 @@ from pathlib import Path
 
 def check_requirements():
     """Check if required packages are installed."""
-    required_packages = ['fastapi', 'uvicorn', 'python-dotenv']
+    required_packages = ['fastapi', 'uvicorn']
     missing_packages = []
     
     for package in required_packages:

@@ -2,13 +2,14 @@ import requests
 import json
 from typing import List, Dict, Any, Optional
 import logging
+import streamlit as st
 
 logger = logging.getLogger(__name__)
 
 class RAGServiceClient:
     """Client to interact with RAG FastAPI service."""
     
-    def __init__(self, base_url: str = "http://127.0.0.1:8002"):
+    def __init__(self, base_url: str = "http://127.0.0.1:8001"):
         self.base_url = base_url.rstrip('/')
     
     def health_check(self) -> bool:
@@ -67,18 +68,16 @@ class RAGServiceClient:
         fast_mode: bool = False,
         chat_history: List[Dict[str, str]] = None
     ) -> Dict[str, Any]:
-        """Query RAG system."""
+        """Query RAG system using GET with query parameters."""
         try:
-            payload = {
-                "user_id": user_id,
+            params = {
                 "query": query,
-                "fast_mode": fast_mode,
-                "chat_history": chat_history or []
+                "fast_mode": fast_mode, 
+                "chat_history": json.dumps(chat_history or [])
             }
-            
-            response = requests.post(
+            response = requests.get(
                 f"{self.base_url}/users/{user_id}/query",
-                json=payload,
+                params=params,
                 timeout=30
             )
             response.raise_for_status()
