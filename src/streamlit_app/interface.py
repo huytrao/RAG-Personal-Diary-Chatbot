@@ -325,12 +325,43 @@ def handle_chat_input() -> None:
         st.session_state.messages.append({"role": "assistant", "content": response})
 
 def handle_entry_action(prompt):
-    """Handle entry action prompts - similar to chat but for entry analysis."""
+    """Handle entry action prompts - generate full AI response."""
+    # Add user message
     st.session_state.messages.append({"role": "user", "content": prompt})
     
-    # Switch to main area to show the response
+    # Generate AI response immediately
+    try:
+        response = ""
+        current_user_id = getattr(st.session_state, 'current_user_id', 1)
+        
+        if not check_rag_service():
+            response = "❌ RAG service is not available. Please start the service first."
+        else:
+            # Query RAG service
+            chat_history = st.session_state.get('messages', [])[:-1]  # Exclude the current message
+            fast_mode = st.session_state.get('fast_mode', False)
+            
+            result = rag_client.query_rag(
+                user_id=current_user_id,
+                query=prompt,
+                fast_mode=fast_mode,
+                chat_history=chat_history
+            )
+            
+            if result.get("status") == "error":
+                response = f"❌ Error: {result.get('error', 'Unknown error')}"
+            else:
+                response = result.get("response", "No response generated")
+        
+        # Add AI response to messages
+        st.session_state.messages.append({"role": "assistant", "content": response})
+        
+    except Exception as e:
+        response = f"❌ Error generating response: {str(e)}"
+        st.session_state.messages.append({"role": "assistant", "content": response})
+    
+    # Close the menu and rerun to show the conversation
     st.session_state.show_entry_actions = False
-    st.info(f"🔍 Analyzing: {prompt[:50]}...")
     st.rerun()
 
 def check_and_sync_entries():
@@ -421,43 +452,29 @@ def render_sidebar() -> str:
         
         # Show entry actions menu if toggled
         if st.session_state.get('show_entry_actions', False):
-            with st.sidebar.expander("📋 Entry Actions", expanded=True):
-                st.markdown("**📊 Analysis Actions:**")
+            with st.sidebar.expander("🎯 Smart Actions", expanded=True):
+                st.markdown("**Essential AI Functions:**")
                 
+                # Row 1
                 col1, col2 = st.sidebar.columns(2)
                 with col1:
-                    if st.button("📈 Trends", use_container_width=True, key="trends_btn"):
-                        handle_entry_action("Phân tích xu hướng và thay đổi trong các mục nhật ký của tôi theo thời gian. Có những pattern nào đáng chú ý?")
-                    if st.button("🏷️ Tags Analysis", use_container_width=True, key="tags_analysis_btn"):
-                        handle_entry_action("Phân tích các tags trong nhật ký của tôi. Những chủ đề nào tôi viết nhiều nhất?")
-                    if st.button("📅 Timeline", use_container_width=True, key="timeline_btn"):
-                        handle_entry_action("Tạo timeline của các sự kiện quan trọng trong nhật ký của tôi.")
+                    if st.button("🎯 Extract Key Points", use_container_width=True, key="extract_btn"):
+                        handle_entry_action("Summarize and extract the main key points from my diary entries. Focus on important decisions, lessons learned, significant events, and actionable insights.")
+                    if st.button("⚡ Next Actions", use_container_width=True, key="next_actions_btn"):
+                        handle_entry_action("Suggest concrete next actions and steps I should take based on my historical data, current goals, and diary patterns. What should I focus on this week?")
+                    if st.button("🎯 Goal Tracker", use_container_width=True, key="goals_btn"):
+                        handle_entry_action("Track my goals and objectives mentioned in diary entries. Analyze progress, identify stuck areas, and suggest ways to accelerate achievement.")
                 
                 with col2:
-                    if st.button("🔍 Search", use_container_width=True, key="search_btn"):
-                        handle_entry_action("Tìm kiếm thông tin cụ thể trong tất cả các mục nhật ký của tôi.")
-                    if st.button("📝 Summary", use_container_width=True, key="summary_btn"):
-                        handle_entry_action("Tóm tắt nội dung chính của tất cả các mục nhật ký trong thời gian gần đây.")
-                    if st.button("🔗 Connections", use_container_width=True, key="connections_btn"):
-                        handle_entry_action("Tìm ra mối liên hệ và patterns giữa các mục nhật ký khác nhau.")
-                
-                st.markdown("**🛠️ Management Actions:**")
-                
-                col3, col4 = st.sidebar.columns(2)
-                with col3:
-                    if st.button("🏷️ Auto Tag", use_container_width=True, key="auto_tag_btn"):
-                        st.info("Auto-tagging feature coming soon!")
-                    if st.button("📊 Stats", use_container_width=True, key="stats_btn"):
-                        handle_entry_action("Hiển thị thống kê chi tiết về nhật ký của tôi: số lượng entry, từ khóa phổ biến, frequency...")
-                
-                with col4:
-                    if st.button("🔄 Sync Check", use_container_width=True, key="sync_check_btn"):
-                        check_and_sync_entries()
-                    if st.button("📈 Export", use_container_width=True, key="export_btn"):
-                        st.info("Export feature coming soon!")
+                    if st.button("� Get Insights", use_container_width=True, key="insights_btn"):
+                        handle_entry_action("Analyze my diary data and provide deep insights about my behavior patterns, productivity cycles, emotional states, and areas for improvement.")
+                    if st.button("� Strategy Plan", use_container_width=True, key="strategy_btn"):
+                        handle_entry_action("Propose strategic plans and approaches based on the learned patterns from my diary. Help me create actionable strategies for achieving my goals.")
+                    if st.button("⏰ Deadline Alert", use_container_width=True, key="deadline_btn"):
+                        handle_entry_action("Review my diary for any mentioned deadlines, important dates, or time-sensitive tasks. Create alerts and reminders for upcoming important events.")
                 
                 # Close menu button
-                if st.button("❌ Close", use_container_width=True, key="close_entry_actions"):
+                if st.button("❌ Close Menu", use_container_width=True, key="close_entry_actions"):
                     st.session_state.show_entry_actions = False
                     st.rerun()
     
