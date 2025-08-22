@@ -16,6 +16,21 @@ from typing import Generator, List
 from backend.get_post_v3 import submit_text_to_database, load_entries_from_database, delete_diary_entry
 from auth_ui import AuthUI
 
+# Voice Input Dependencies
+try:
+    from streamlit_webrtc import webrtc_streamer, WebRtcMode, RTCConfiguration
+    import av
+    import numpy as np
+    import google.generativeai as genai
+    import tempfile
+    import threading
+    import queue
+    import concurrent.futures
+    VOICE_AVAILABLE = True
+except ImportError as e:
+    print(f"Voice input dependencies not available: {e}")
+    VOICE_AVAILABLE = False
+
 # Load environment variables
 from dotenv import load_dotenv
 load_dotenv()
@@ -33,6 +48,128 @@ except ImportError as e:
     print(f"Warning: RAG client not available: {e}")
     rag_client = None
     RAG_AVAILABLE = False
+
+# ========================================
+# VOICE INPUT FUNCTIONS
+# ========================================
+
+def get_user_audio_directory(user_id: int) -> str:
+    """Get user-specific audio directory path."""
+    # Get project root directory (go up from src/streamlit_app/)
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(os.path.dirname(current_dir))
+    audio_dir = os.path.join(project_root, "user_audio", f"user_{user_id}_audio")
+    os.makedirs(audio_dir, exist_ok=True)
+    return audio_dir
+
+def transcribe_audio_with_gemini_live(audio_data: bytes, user_id: int) -> str:
+    """Transcribe audio using Gemini API."""
+    try:
+        # Get API key
+        api_key = os.getenv("GOOGLE_API_KEY")
+        if not api_key:
+            return "❌ Google API key not configured"
+        
+        # Configure Gemini
+        genai.configure(api_key=api_key)
+        
+        # Save audio temporarily
+        audio_dir = get_user_audio_directory(user_id)
+        temp_audio_path = os.path.join(audio_dir, f"temp_audio_{int(time.time())}.wav")
+        try:
+            with open(temp_audio_path, 'wb') as f:
+                f.write(audio_data)
+            
+            # Upload audio file to Gemini
+            audio_file = genai.upload_file(path=temp_audio_path, mime_type="audio/wav")
+            
+            # Use Gemini model for transcription
+            model = genai.GenerativeModel("gemini-2.5-flash-lite")
+            prompt = """Convert speech to text. Please transcribe this audio recording accurately.
+            
+Instructions:
+- Listen to the audio and convert the spoken words to text
+- Maintain proper grammar and punctuation
+- Return only the transcribed text, no additional commentary
+- If you cannot understand parts of the audio, indicate with [unclear]
+
+Transcription:"""
+
+            response = model.generate_content([prompt, audio_file])
+
+            if response and response.text:
+                # Clean up the uploaded file
+                try:
+                    genai.delete_file(audio_file.name)
+                except Exception:
+                    pass
+
+                return response.text.strip()
+            else:
+                return "❌ No transcription received"
+        finally:
+            # Clean up temporary file
+            if os.path.exists(temp_audio_path):
+                try:
+                    os.remove(temp_audio_path)
+                except Exception as e:
+                    print(f"Warning: Could not delete temp audio file: {e}")
+    except PermissionError:
+        return "⚠️ Vui lòng cấp quyền truy cập microphone"
+    except Exception as e:
+        print(f"Transcription error: {e}")
+        return f"❌ Transcription failed: {str(e)}"
+
+class AudioProcessor:
+    """Audio processor for real-time audio capture."""
+    
+    def __init__(self):
+        self.audio_frames = queue.Queue()
+        self.is_recording = False
+    
+    def audio_frame_callback(self, frame):
+        """Callback for processing audio frames."""
+        if self.is_recording:
+            audio_array = frame.to_ndarray()
+            self.audio_frames.put(audio_array)
+        return frame
+    
+    def start_recording(self):
+        """Start recording audio."""
+        self.is_recording = True
+        self.audio_frames = queue.Queue()
+    
+    def stop_recording(self):
+        """Stop recording and return audio data."""
+        self.is_recording = False
+        
+        # Collect all audio frames
+        frames = []
+        while not self.audio_frames.empty():
+            try:
+                frame = self.audio_frames.get_nowait()
+                frames.append(frame)
+            except queue.Empty:
+                break
+        
+        if not frames:
+            return None
+        
+        # Concatenate frames and ensure proper format
+        audio_data = np.concatenate(frames, axis=0)
+        
+        # Ensure audio is mono (single channel)
+        if audio_data.ndim > 1:
+            audio_data = np.mean(audio_data, axis=1)
+        
+        # Normalize audio data to prevent distortion
+        if np.max(np.abs(audio_data)) > 0:
+            audio_data = audio_data / np.max(np.abs(audio_data)) * 0.8
+        
+        # Convert to 16-bit PCM format
+        audio_bytes = (audio_data * 32767).astype(np.int16).tobytes()
+        
+        return audio_bytes
 
 # ========================================
 # HELPER FUNCTIONS
@@ -692,12 +829,45 @@ def render_diary_entry_form() -> None:
     
     date = st.date_input("📅 Date", value=datetime.now().date())
     title = st.text_input("📌 Title", placeholder="Enter title...")
+    audio = st.audio_input("Record your audio")
+    # Prevent infinite rerun loop by using a flag
+    if audio and not st.session_state.get('voice_transcribed_content') and not st.session_state.get('audio_transcribed_once'):
+        with open("./temp/recorded_audio.wav", "wb") as f:
+            f.write(audio.getbuffer())
+        st.success("Audio recorded and saved successfully!")
+        user_id = getattr(st.session_state, 'current_user_id', 1)
+        with st.spinner("🔄 Transcribing audio..."):
+            transcribed_text = transcribe_audio_with_gemini_live(audio.getbuffer(), user_id)
+            if transcribed_text and not transcribed_text.startswith("❌") and not transcribed_text.startswith("⚠️"):
+                st.session_state.voice_transcribed_content = transcribed_text
+                st.session_state.audio_transcribed_once = True
+                st.success("✅ Voice transcribed successfully!")
+                st.rerun()
+            else:
+                st.session_state.audio_transcribed_once = True
+                st.error(transcribed_text or "Failed to transcribe audio")
+    # Reset the flag if no audio is present
+    if not audio and st.session_state.get('audio_transcribed_once'):
+        st.session_state.audio_transcribed_once = False
+    
+    # Content textarea - use transcribed content if available
+    content_value = st.session_state.get('voice_transcribed_content', '')
+    if not content_value:
+        content_value = st.session_state.get('current_content', '')
     
     content = st.text_area(
-        "📖 Content",
-        placeholder="Write your diary entry... Use #tags!",
-        height=150
+        "�📖 Content",
+        value=content_value,
+        placeholder="Write your diary entry... Use #tags! Or use voice input above.",
+        height=150,
+        key="diary_content_input"
     )
+    
+    # Clear transcribed content after user sees it
+    if 'voice_transcribed_content' in st.session_state:
+        del st.session_state.voice_transcribed_content
+        # Also reset the transcribed_once flag so next audio triggers transcription
+        st.session_state.audio_transcribed_once = False
     
     # Tags
     st.markdown("### 🏷️ Tags")
@@ -746,6 +916,11 @@ def render_diary_entry_form() -> None:
                         # Refresh entries
                         st.session_state.diary_entries = load_entries_from_database(user_id)
                         st.session_state.show_form = False
+                        
+                        # Clear any remaining voice content
+                        if 'voice_transcribed_content' in st.session_state:
+                            del st.session_state.voice_transcribed_content
+                        
                         st.success("✅ Diary entry saved successfully!")
                         st.rerun()
                     else:
@@ -758,6 +933,9 @@ def render_diary_entry_form() -> None:
     with col2:
         if st.button("❌ Cancel"):
             st.session_state.show_form = False
+            # Clear any voice content
+            if 'voice_transcribed_content' in st.session_state:
+                del st.session_state.voice_transcribed_content
             st.rerun()
 
 # ========================================
