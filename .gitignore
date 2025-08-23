@@ -118,3 +118,11 @@ models/
 logs/
 *.pkl
 *.model
+
+# Vector databases & generated files
+/VectorDB/
+/src/VectorDB/
+/src/Indexingstep/src/Indexingstep/diary_vector_db_enhanced/
+*.db
+*.sqlite3
+*.bin
