@@ -6,6 +6,7 @@ import subprocess
 import sys
 import os
 from pathlib import Path
+import time
 
 def check_requirements():
     """Check if required packages are installed."""
@@ -55,8 +56,8 @@ def start_service():
         return
     
     print("🚀 Starting RAG Service...")
-    print("📍 Service URL: http://127.0.0.1:8001")
-    print("📖 API Docs: http://127.0.0.1:8001/docs")
+    print("📍 Service URL: http://0.0.0.0:8001")
+    print("📖 API Docs: http://0.0.0.0:8001/docs")
     print("💾 Vector databases will be stored in: src/VectorDB/")
     print("\nPress Ctrl+C to stop the service")
     print("-" * 50)
@@ -65,18 +66,25 @@ def start_service():
         # Change to project root directory
         os.chdir(Path(__file__).parent)
         
-        # Start the service
-        subprocess.run([
+        # Start the service in the background
+        process = subprocess.Popen([
             sys.executable, "-m", "uvicorn",
             "src.rag_service.main:app",
-            "--host", "127.0.0.1",
+            "--host", "0.0.0.0",
             "--port", "8001",
             "--reload"
         ])
-    except KeyboardInterrupt:
-        print("\n🛑 RAG Service stopped")
+        print(f"🔄 RAG Service running in background (PID: {process.pid})")
+        return process
     except Exception as e:
         print(f"❌ Error starting service: {e}")
+        return None
+
+def start_streamlit():
+    # Start Streamlit UI on port 7860 (default for Spaces)
+    os.system("streamlit run src/streamlit_app/interface.py --server.port 7860")
 
 if __name__ == "__main__":
     start_service()
+    time.sleep(3)
+    start_streamlit()

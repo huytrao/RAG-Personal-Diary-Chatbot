@@ -856,7 +856,7 @@ def render_diary_entry_form() -> None:
         content_value = st.session_state.get('current_content', '')
     
     content = st.text_area(
-        "�📖 Content",
+        "📖 Content",
         value=content_value,
         placeholder="Write your diary entry... Use #tags! Or use voice input above.",
         height=150,

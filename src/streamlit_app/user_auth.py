@@ -5,21 +5,17 @@ from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 import os
 class UserAuthManager:
+    "this class use for user authentication and session management"
     def __init__(self, db_path: str = "./user_db/auth.db"):
         self.db_path = db_path
         self.session_timeout = timedelta(hours=24)
         self._init_auth_database()
     
     def _init_auth_database(self):
-    # Tạo directory trước khi connect
-        db_dir = os.path.dirname(os.path.abspath(self.db_path))  # Sử dụng abspath
-        if not os.path.exists(db_dir):
+        # Create directory if it doesn't exist
+        db_dir = os.path.dirname(self.db_path)
+        if db_dir and not os.path.exists(db_dir):
             os.makedirs(db_dir, exist_ok=True)
-            print(f"Created directory: {db_dir}")  # Debug log
-        
-        # Đảm bảo path tồn tại
-        if not os.path.exists(db_dir):
-            raise Exception(f"Cannot create directory: {db_dir}")
         
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
