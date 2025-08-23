@@ -1,0 +1,51 @@
+# Environment Variables Template for RAG Personal Diary Chatbot
+# Copy this file to .env and fill in your actual values
+
+# API Keys
+OPENAI_API_KEY=your_openai_api_key_here
+GOOGLE_API_KEY=your_google_api_key_here
+ANTHROPIC_API_KEY=your_anthropic_api_key_here
+
+# Database Configuration
+DATABASE_URL=sqlite:///./user_database/auth.db
+VECTOR_DB_PATH=./VectorDB
+
+# Model Configuration
+EMBEDDING_MODEL=google-universal-sentence-encoder
+LLM_MODEL=gpt-3.5-turbo
+CHUNK_SIZE=1000
+CHUNK_OVERLAP=200
+
+# Server Configuration
+RAG_SERVICE_PORT=8001
+STREAMLIT_PORT=8501
+FASTAPI_PORT=8000
+
+# Security
+SECRET_KEY=your_secret_key_here
+JWT_SECRET=your_jwt_secret_here
+
+# Logging
+LOG_LEVEL=INFO
+LOG_FILE=./logs/app.log
+
+# Vector Database
+CHROMA_DB_PATH=./VectorDB
+PERSIST_DIRECTORY=./VectorDB
+
+# File Processing
+SUPPORTED_FORMATS=pdf,docx,txt,md
+MAX_FILE_SIZE=10485760
+TEMP_DIR=./temp
+
+# RAG Configuration
+TOP_K_RESULTS=5
+SIMILARITY_THRESHOLD=0.7
+MAX_TOKENS=4096
+TEMPERATURE=0.7
+
+# Instructions:
+# 1. Copy this file to .env
+# 2. Replace all placeholder values with your actual configuration
+# 3. Never commit .env to version control
+# 4. Keep your API keys secure
