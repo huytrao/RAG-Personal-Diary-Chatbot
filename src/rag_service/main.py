@@ -51,7 +51,12 @@ app.add_middleware(
 )
 
 # In-memory cache for RAG systems
-rag_systems_cache: Dict[int, DiaryRAGSystem] = {}
+if RAG_MODULES_AVAILABLE:
+    # Use forward-reference string so the type is not evaluated at import-time
+    rag_systems_cache: Dict[int, "DiaryRAGSystem"] = {}
+else:
+    # Fallback typing when RAG modules unavailable
+    rag_systems_cache: Dict[int, Any] = {}
 
 # ========================================
 # PYDANTIC MODELS
@@ -163,7 +168,7 @@ def get_document_count(user_id: int) -> int:
         logger.error(f"Error getting document count for user {user_id}: {e}")
         return 0
 
-def get_or_create_rag_system(user_id: int) -> DiaryRAGSystem:
+def get_or_create_rag_system(user_id: int) -> "DiaryRAGSystem":
     """Get existing RAG system or create new one."""
     if user_id not in rag_systems_cache:
         if not check_vector_db_exists(user_id):
@@ -714,8 +719,8 @@ if __name__ == "__main__":
     vector_db_dir = os.path.join(base_dir, "VectorDB")
     os.makedirs(vector_db_dir, exist_ok=True)
     
-    print(f"🚀 Starting RAG Service...")
-    print(f"📁 Vector DB base path: {vector_db_dir}")
-    print(f"🔑 Google API Key configured: {bool(os.getenv('GOOGLE_API_KEY'))}")
+    print(f"Starting RAG Service...")
+    print(f"Vector DB base path: {vector_db_dir}")
+    print(f"Google API Key configured: {bool(os.getenv('GOOGLE_API_KEY'))}")
     
     uvicorn.run(app, host="127.0.0.1", port=8001, reload=False)
