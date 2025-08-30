@@ -1,5 +1,22 @@
 # RAG Personal Diary Chatbot
 
+## 🚀 Try the Live Demo
+
+**[Experience the RAG Personal Diary Chatbot on Hugging Face Spaces](https://huggingface.co/spaces/huytrao123/Diary-chatbot-RAG)**
+
+## 📸 Project Screenshots
+
+### Main Interface
+![Main Interface](images/Giao_Dien.png)
+
+### Chat Interface
+![Chat Interface](images/Khung_Chat.png)
+
+### RAG System Architecture
+![RAG System Architecture](images/RAG_system.drawio.png)
+
+---
+
 ## 📖 Project Description
 
 RAG Personal Diary Chatbot is an intelligent chatbot application that uses RAG (Retrieval-Augmented Generation) architecture to interact with users' personal diaries. The application allows users to ask questions about diary content and receive accurate answers based on actual data.

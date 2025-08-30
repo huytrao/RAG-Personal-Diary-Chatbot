@@ -832,6 +832,7 @@ def render_diary_entry_form() -> None:
     audio = st.audio_input("Record your audio")
     # Prevent infinite rerun loop by using a flag
     if audio and not st.session_state.get('voice_transcribed_content') and not st.session_state.get('audio_transcribed_once'):
+        os.makedirs("./temp", exist_ok=True)
         with open("./temp/recorded_audio.wav", "wb") as f:
             f.write(audio.getbuffer())
         st.success("Audio recorded and saved successfully!")
