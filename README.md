@@ -1,11 +1,12 @@
 # RAG Personal Diary Chatbot
 
 ## 🚀 Try the Live Demo
- Have you ever forgotten an important memory and wished you could easily find it again?
- Would you like to see how your mood changes day by day?
- Do you set goals but often forget them or struggle to see how much progress you’ve made?
- Are you curious to explore your hidden habits, emotions, and the story of your own life?
- Start your journey today — let Diary AI help you capture memories, track progress, and discover yourself.
+ - Have you ever forgotten an important memory and wished you could easily find it again?
+ - Would you like to see how your mood changes day by day?
+ - Do you set goals but often forget them or struggle to see how much progress you’ve made?
+ - Are you curious to explore your hidden habits, emotions, and the story of your own life?
+ - Start your journey today — let Diary AI help you capture memories, track progress, and 
+ - discover yourself.
 **[Experience the RAG Personal Diary Chatbot on Hugging Face Spaces](https://huggingface.co/spaces/huytrao123/Diary-chatbot-RAG)**
 
 ## 📸 Project Screenshots
