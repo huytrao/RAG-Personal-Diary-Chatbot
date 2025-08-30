@@ -1,7 +1,11 @@
 # RAG Personal Diary Chatbot
 
 ## 🚀 Try the Live Demo
-
+ Have you ever forgotten an important memory and wished you could easily find it again?
+ Would you like to see how your mood changes day by day?
+ Do you set goals but often forget them or struggle to see how much progress you’ve made?
+ Are you curious to explore your hidden habits, emotions, and the story of your own life?
+ Start your journey today — let Diary AI help you capture memories, track progress, and discover yourself.
 **[Experience the RAG Personal Diary Chatbot on Hugging Face Spaces](https://huggingface.co/spaces/huytrao123/Diary-chatbot-RAG)**
 
 ## 📸 Project Screenshots
@@ -46,7 +50,7 @@ RAG Personal Diary Chatbot is an intelligent chatbot application that uses RAG (
 
 ### Install Dependencies
 ```bash
-# Create virtual environment
+# Create virtual environment by conda or venv
 python -m venv .venv
 
 # Activate virtual environment
@@ -75,7 +79,6 @@ VECTOR_DB_PATH=./VectorDB
 
 # Model Configuration
 EMBEDDING_MODEL=google-universal-sentence-encoder
-LLM_MODEL=gpt-3.5-turbo
 CHUNK_SIZE=1000
 CHUNK_OVERLAP=200
 
@@ -144,32 +147,6 @@ RAG-Personal-Diary-Chatbot/
 └── README.md
 ```
 
-## 🔧 Configuration
-
-### Vector Database
-
-### AI Models
-
-## 📊 Performance
-
-
-## 🧪 Testing
-
-```bash
-# Run all tests
-python -m pytest tests/
-
-# Run specific test
-python -m pytest tests/test_rag_system.py
-```
-
-## 🤝 Contributing
-
-1. Fork the project
-2. Create feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to branch (`git push origin feature/AmazingFeature`)
-5. Open Pull Request
 
 ## 📝 License
 
@@ -214,7 +191,7 @@ RAG Personal Diary Chatbot is an intelligent chatbot application that leverages 
 
 ### System Requirements
 
-- Python 3.8+
+- Python 3.11.9+
 
 ### Install Dependencies
 
@@ -240,12 +217,6 @@ Create a `.env` file in the project root directory with the following structure:
 # Google API Configuration for RAG System
 GOOGLE_API_KEY=[Google API key]
 
-# Database Configuration
-DATABASE_PATH=./src/streamlit_app/backend/diary.db
-
-# Vector Database Configuration
-VECTOR_DB_PATH=./src/Indexingstep/diary_vector_db_enhanced
-COLLECTION_NAME=diary_entries
 
 # RAG Configuration
 EMBEDDING_MODEL=models/embedding-001
@@ -325,3 +296,20 @@ RAG-Personal-Diary-Chatbot/
 - ChromaDB team for vector database
 - FastAPI and Streamlit communities
 - RAG architecture
+  
+## 🚀 Future Development 
+
+### 🔮 Planned Features
+
+#### Phase 1: Enhanced AI Capabilities
+- **Multi-language Support**: Add support for Vietnamese, Chinese, and other languages
+- **Advanced RAG Models**: Integration with Claude, GPT-4, and other cutting-edge LLMs
+- **Custom Embedding Models**: Fine-tuned models for diary-specific content
+- **Semantic Chunking**: Intelligent text splitting based on context and meaning
+
+#### Security & Privacy
+- **End-to-End Encryption**: Enhanced data privacy
+- **OAuth 2.0**: Multiple authentication providers
+- **Role-Based Access Control**: Granular permission system
+- **GDPR Compliance**: Data protection and user rights
+
